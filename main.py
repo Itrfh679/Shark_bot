@@ -17,7 +17,8 @@ import requests
 from config import (
     SHARK_API_KEY, SHARK_API_SECRET, SHARK_BASE_URL, SYMBOL,
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-    LEVERAGE, CONTRACT_QTY, MAX_TRADES_PER_DAY, RISK_REWARD_RATIO,
+    LEVERAGE, CONTRACT_QTY, RISK_PER_TRADE_INR, MIN_CONTRACT_QTY, MAX_CONTRACT_QTY,
+    MAX_TRADES_PER_DAY, RISK_REWARD_RATIO,
     MIN_SL_POINTS, MAX_SL_POINTS, SL_BUFFER_POINTS, COOLDOWN_LOSS_MINS,
     HTF_RESOLUTION, EMA_HTF, EMA_HTF_MIN_SLOPE, EMA_HTF_DANGER_PCT,
     LTF_RESOLUTION, EMA_FAST, EMA_SLOW, RSI_PERIOD,
@@ -348,8 +349,15 @@ class CloudTradingBot:
                 return
             target = entry - (risk * RISK_REWARD_RATIO)
 
+        # Dynamic Position Sizing Formula: Quantity = Risk (₹25) / Stop Loss Distance (Points)
+        raw_qty = RISK_PER_TRADE_INR / max(risk, 1.0)
+        trade_qty = round(max(MIN_CONTRACT_QTY, min(raw_qty, MAX_CONTRACT_QTY)), 2)
+        expected_risk = risk * trade_qty
+        expected_reward = (risk * RISK_REWARD_RATIO) * trade_qty
+        margin_required = (entry * trade_qty) / LEVERAGE
+
         # Place Order
-        res = self.client.place_bracket_order(signal, CONTRACT_QTY, sl, target)
+        res = self.client.place_bracket_order(signal, trade_qty, sl, target)
         if not res.get("success"):
             raw_err = str(res.get("raw", {}).get("error", "Rejected"))
             log.error(f"Order failed on exchange: {raw_err}")
@@ -363,19 +371,19 @@ class CloudTradingBot:
             "entry": entry,
             "sl": sl,
             "target": target,
-            "qty": CONTRACT_QTY
+            "qty": trade_qty
         }
 
         send_telegram(
             f"🚀 *A+ {signal} ORDER EXECUTED ON SHARK!* 🦈\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
             f"• *Side*: `{signal}` 🟢\n"
-            f"• *Size*: `{CONTRACT_QTY} SOL` (~₹160 Margin at {LEVERAGE}×)\n"
+            f"• *Dynamic Size*: `{trade_qty} SOL` (~₹{margin_required:,.0f} Margin at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
-            f"• *Stop Loss*: ₹{sl:,.0f} (-₹{risk * CONTRACT_QTY:.1f} Risk) 🛑\n"
-            f"• *Target (1:{RISK_REWARD_RATIO})*: ₹{target:,.0f} (+₹{risk * RISK_REWARD_RATIO * CONTRACT_QTY:.1f} Profit) 🎯\n\n"
+            f"• *Stop Loss*: ₹{sl:,.0f} (-₹{expected_risk:.1f} Risk [~₹25]) 🛑\n"
+            f"• *Target (1:{RISK_REWARD_RATIO})*: ₹{target:,.0f} (+₹{expected_reward:.1f} Profit) 🎯\n\n"
             f"📈 Trades Today: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
-            f"🛡️ Safe Capital Buffer Active 🔒"
+            f"🛡️ Dynamic Risk Management Active 🔒"
         )
 
 import http.server

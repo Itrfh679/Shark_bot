@@ -10,13 +10,16 @@ SYMBOL             = os.getenv("SYMBOL", "SOLINR")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8959389105:AAGza59y2PmqfDrybiZnYJjcAvyIhKLU3w0")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "5706939133")
 
-# Strategy Parameters
+# Strategy & Dynamic Risk Management (Strict 2.5% Capital Rule)
 LEVERAGE           = 25
-CONTRACT_QTY       = 0.40       # 0.40 SOL (~₹160 margin from ₹1,000 capital)
-MAX_TRADES_PER_DAY = 2          # Strict daily limit
-RISK_REWARD_RATIO  = 2.3        # 1:2.3 RR
-MIN_SL_POINTS      = 45.0       # ₹18.0 min risk (prevents too-tight SL hits)
-MAX_SL_POINTS      = 85.0       # ₹34.0 max risk
+RISK_PER_TRADE_INR = 25.0       # Strictly ₹25 fixed loss per trade (2.5% of ₹1,000)
+MIN_CONTRACT_QTY   = 0.20       # Minimum quantity boundary
+MAX_CONTRACT_QTY   = 0.50       # Maximum quantity (~₹200 margin at 25x from ₹1,000 capital)
+CONTRACT_QTY       = 0.35       # Default fallback
+MAX_TRADES_PER_DAY = 2          # Strict daily limit (Max 2 trades/day)
+RISK_REWARD_RATIO  = 2.6        # 1:2.6 RR (Guarantees +₹65 gross profit to easily beat fees)
+MIN_SL_POINTS      = 45.0       # 45 pts min SL
+MAX_SL_POINTS      = 95.0       # 95 pts max SL
 SL_BUFFER_POINTS   = 12.0       # Strong 12pt buffer against Solana stop-hunt wicks
 COOLDOWN_LOSS_MINS = 60         # 1-hour patience cooldown after any loss
 
