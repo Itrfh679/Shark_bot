@@ -10,17 +10,17 @@ SYMBOL             = os.getenv("SYMBOL", "SOLINR")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8959389105:AAGza59y2PmqfDrybiZnYJjcAvyIhKLU3w0")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "5706939133")
 
-# Strategy & Dynamic Risk Management (₹150 Margin, ₹50 Risk, ₹150 Profit Rule)
+# Strategy & Dynamic Risk Management (Realistic 1:2 RR | ₹150 Margin)
 LEVERAGE           = 25
-RISK_PER_TRADE_INR = 50.0       # Strictly ₹50 fixed loss per trade (5% of ₹1,000)
+RISK_PER_TRADE_INR = 40.0       # Realistic ₹38-₹40 loss per trade (Safely inside ₹50 budget)
 MIN_CONTRACT_QTY   = 0.20       # Minimum quantity boundary
 MAX_CONTRACT_QTY   = 0.40       # Max quantity (~₹150 margin at 25x with ₹10k SOL)
 CONTRACT_QTY       = 0.38       # Target trade size (~₹150 margin)
 MAX_TRADES_PER_DAY = 2          # Strict daily limit (Max 2 trades/day)
-RISK_REWARD_RATIO  = 3.0        # 1:3 RR (Guarantees +₹150 gross profit on ₹50 risk)
-MIN_SL_POINTS      = 55.0       # 55 pts min SL (~0.55%)
-MAX_SL_POINTS      = 140.0      # 140 pts max SL (~1.40% wide breathing room)
-SL_BUFFER_POINTS   = 15.0       # Strong 15pt buffer against Solana stop-hunt wicks
+RISK_REWARD_RATIO  = 2.0        # Practical 1:2 RR (2.0% move = +₹76-₹80 profit!)
+MIN_SL_POINTS      = 50.0       # 50 pts min SL (~0.50%)
+MAX_SL_POINTS      = 110.0      # 110 pts max SL (~1.10% safe room against wicks)
+SL_BUFFER_POINTS   = 12.0       # 12pt buffer against Solana stop-hunt wicks
 COOLDOWN_LOSS_MINS = 60         # 1-hour patience cooldown after any loss
 
 # Timeframes & Indicators
