@@ -400,6 +400,50 @@ def run_health_server():
     except Exception as e:
         log.error(f"Health server error: {e}")
 
+import signal
+import atexit
+
+_has_alerted_shutdown = False
+
+def emergency_shutdown_handler(signum=None, frame=None):
+    global _has_alerted_shutdown
+    if _has_alerted_shutdown:
+        return
+    _has_alerted_shutdown = True
+    log.warning(f"Shutdown signal received: {signum}")
+    try:
+        send_telegram(
+            "⚠️ *CRITICAL ALERT: SHARK CLOUD BOT IS TURNING OFF!* 🛑\n\n"
+            "• *Event*: Cloud Bot process band ya restart ho raha hai.\n"
+            "• *Reason*: Server stop / crash signal received.\n"
+            "• *Action*: Render dashboard me jakar status check karein!"
+        )
+    except Exception as e:
+        log.error(f"Failed to send shutdown Telegram alert: {e}")
+    if signum is not None:
+        sys.exit(0)
+
+try:
+    signal.signal(signal.SIGTERM, emergency_shutdown_handler)
+    signal.signal(signal.SIGINT, emergency_shutdown_handler)
+except Exception:
+    pass
+
+def uncaught_exception_handler(exc_type, exc_value, exc_traceback):
+    err_str = f"{exc_type.__name__}: {exc_value}"
+    log.error(f"Uncaught exception: {err_str}")
+    try:
+        send_telegram(
+            f"🚨 *CRITICAL ALERT: CLOUD BOT ERROR!* ⚠️\n\n"
+            f"• *Error*: `{err_str}`\n"
+            f"• Bot automatically recover karne ki koshish kar raha hai."
+        )
+    except Exception:
+        pass
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+sys.excepthook = uncaught_exception_handler
+
 def main():
     bot = CloudTradingBot()
     t1 = threading.Thread(target=bot.run_telegram_listener, daemon=True)
