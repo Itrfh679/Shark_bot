@@ -24,6 +24,10 @@ SL_BUFFER_POINTS   = 12.0       # 12pt buffer against Solana stop-hunt wicks
 COOLDOWN_LOSS_MINS = 60         # 1-hour patience cooldown after any loss
 
 # Timeframes & Indicators
+# NOTE: User Strategy Presets:
+# Current Active: Regular Frequency Mode (EMA_HTF_MIN_SLOPE = 0.6, MIN_WICK_RATIO = 0.30)
+# Sniper Old Mode: High-Capital Strict Mode (EMA_HTF_MIN_SLOPE = 1.2, MIN_WICK_RATIO = 0.45)
+# (When user says "Capital increase ho gaya old strategy setup karo", switch back to 1.2 & 0.45)
 HTF_RESOLUTION     = "15m"
 EMA_HTF            = 200
 EMA_HTF_MIN_SLOPE  = 0.6        # Balanced momentum slope (Rejects flat markets while catching smooth trends)
