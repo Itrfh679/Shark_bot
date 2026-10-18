@@ -225,6 +225,70 @@ class SharkClient:
             log.error(f"Order exception: {e}")
             return {"success": False, "error": str(e)}
 
+    def place_limit_order(self, side: str, qty: float, price: float, symbol: str = None, reduce_only: bool = True) -> dict:
+        """
+        Places limit order (e.g. Take Profit).
+        """
+        if not self.is_live:
+            return {"success": True}
+        target_sym = symbol or self.symbol
+        endpoint = "/v1/order/place-order"
+        ts = str(int(time.time() * 1000))
+        payload = {
+            "timestamp": ts,
+            "placeType": "ORDER_FORM",
+            "quantity": qty,
+            "side": side.upper(),
+            "symbol": target_sym,
+            "type": "LIMIT",
+            "price": float(price),
+            "reduceOnly": reduce_only,
+            "marginAsset": "INR",
+            "deviceType": "WEB",
+            "userCategory": "EXTERNAL",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        sig = self._sign_body(payload)
+        headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
+        try:
+            r = self.session.post(f"{self.base_url}{endpoint}", data=body, headers=headers, timeout=15)
+            log.info(f"Limit order: {r.status_code} - {r.text}")
+            return {"success": r.status_code in [200, 201], "data": r.text}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def place_stop_market_order(self, side: str, qty: float, stop_price: float, symbol: str = None, reduce_only: bool = True) -> dict:
+        """
+        Places stop market order (e.g. Stop Loss).
+        """
+        if not self.is_live:
+            return {"success": True}
+        target_sym = symbol or self.symbol
+        endpoint = "/v1/order/place-order"
+        ts = str(int(time.time() * 1000))
+        payload = {
+            "timestamp": ts,
+            "placeType": "ORDER_FORM",
+            "quantity": qty,
+            "side": side.upper(),
+            "symbol": target_sym,
+            "type": "STOP_MARKET",
+            "stopPrice": float(stop_price),
+            "reduceOnly": reduce_only,
+            "marginAsset": "INR",
+            "deviceType": "WEB",
+            "userCategory": "EXTERNAL",
+        }
+        body = json.dumps(payload, separators=(",", ":"))
+        sig = self._sign_body(payload)
+        headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
+        try:
+            r = self.session.post(f"{self.base_url}{endpoint}", data=body, headers=headers, timeout=15)
+            log.info(f"Stop market order: {r.status_code} - {r.text}")
+            return {"success": r.status_code in [200, 201], "data": r.text}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def close_all_positions(self) -> bool:
         """
         Emergency close all open positions on Shark Exchange.

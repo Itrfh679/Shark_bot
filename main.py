@@ -416,6 +416,15 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
                 send_telegram(f"❌ *XRP Order Error:*\n`{res.get('error')}`")
             return
 
+        if self.path == "/check-pos":
+            client = SharkClient()
+            positions = client.get_open_positions()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(positions).encode())
+            return
+
         if self.path == "/set-xrp-tpsl":
             client = SharkClient()
             positions = client.get_open_positions()
@@ -434,21 +443,35 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
                 tp_price = 126.90
                 sl_price = 123.34
                 res = client.set_split_tp_sl(pos_id, tp_price, sl_price, qty)
+                fallback_res = {}
+                if not res.get("success"):
+                    # Fallback: Place bracket exit orders directly (ReduceOnly Limit TP & Stop Market SL)
+                    r_tp = client.place_limit_order("SELL", qty, tp_price, "XRPINR", reduce_only=True)
+                    r_sl = client.place_stop_market_order("SELL", qty, sl_price, "XRPINR", reduce_only=True)
+                    fallback_res = {"tp_order": r_tp, "sl_order": r_sl}
+
+                combined = {
+                    "split_res": res,
+                    "fallback_res": fallback_res,
+                    "pos_id": pos_id,
+                    "xrp_pos": xrp_pos
+                }
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps(res).encode())
-                if res.get("success"):
+                self.wfile.write(json.dumps(combined).encode())
+
+                is_success = res.get("success") or (fallback_res.get("tp_order", {}).get("success") and fallback_res.get("sl_order", {}).get("success"))
+                if is_success:
                     send_telegram(
                         "🎯 *XRP TEST POSITION: TP & SL SET HO GAYA!* 🛡️\n\n"
-                        f"• *Position ID*: `{pos_id}`\n"
-                        f"• *Quantity*: `{qty} XRP`\n"
-                        f"• *Take Profit (TP)*: `₹{tp_price}` (+₹8.00 Profit Target) 🎯\n"
-                        f"• *Stop Loss (SL)*: `₹{sl_price}` (-₹8.00 Loss Limit) 🛑\n\n"
-                        "Aap Shark Exchange App me Positions me dekh sakte hain, TP aur SL lag chuka hai!"
+                        f"• *Asset*: `XRPINR` (4.5 XRP)\n"
+                        f"• *Take Profit (TP)*: `₹{tp_price}` (+₹8.00 Target) 🎯\n"
+                        f"• *Stop Loss (SL)*: `₹{sl_price}` (-₹8.00 Limit) 🛑\n\n"
+                        "Aap Shark Exchange App me Positions me ya Open Orders me live dekh sakte hain!"
                     )
                 else:
-                    send_telegram(f"❌ *TP/SL Set Error:*\n`{res.get('data') or res.get('error')}`")
+                    send_telegram(f"❌ *TP/SL Result:*\n`{combined}`")
             else:
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
