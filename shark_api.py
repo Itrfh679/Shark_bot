@@ -157,18 +157,19 @@ class SharkClient:
             log.error(f"Error fetching open positions: {e}")
         return []
 
-    def set_leverage(self, leverage: int = 25) -> bool:
+    def set_leverage(self, leverage: int = 25, symbol: str = None) -> bool:
         """
-        Updates leverage for BTCINR contract.
+        Updates leverage for a contract on Shark Exchange.
         """
         if not self.is_live:
             return True
 
+        target_sym = symbol or self.symbol
         endpoint = "/v1/exchange/update/leverage"
         ts = str(int(time.time() * 1000))
         payload = {
             "leverage": leverage,
-            "contractName": self.symbol,
+            "contractName": target_sym,
             "timestamp": ts,
         }
         body = json.dumps(payload, separators=(",", ":"))
@@ -177,7 +178,7 @@ class SharkClient:
 
         try:
             r = self.session.post(f"{self.base_url}{endpoint}", data=body, headers=headers, timeout=10)
-            return r.status_code == 201
+            return r.status_code in [200, 201]
         except Exception as e:
             log.error(f"Error updating leverage: {e}")
             return False
@@ -185,15 +186,16 @@ class SharkClient:
     # ─────────────────────────────────────────────────────────
     #  ORDER EXECUTION
     # ─────────────────────────────────────────────────────────
-    def place_market_order(self, side: str, qty: float) -> dict:
+    def place_market_order(self, side: str, qty: float, symbol: str = None) -> dict:
         """
         Places market order on Shark Exchange.
         side: 'BUY' or 'SELL'
-        qty: e.g. 0.002
+        qty: e.g. 4.5
         """
         if not self.is_live:
             return {"success": True, "order_id": f"sim_{int(time.time())}"}
 
+        target_sym = symbol or self.symbol
         endpoint = "/v1/order/place-order"
         ts = str(int(time.time() * 1000))
         payload = {
@@ -201,7 +203,7 @@ class SharkClient:
             "placeType": "ORDER_FORM",
             "quantity": qty,
             "side": side.upper(),
-            "symbol": self.symbol,
+            "symbol": target_sym,
             "type": "MARKET",
             "reduceOnly": False,
             "marginAsset": "INR",

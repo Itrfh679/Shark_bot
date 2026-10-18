@@ -391,6 +391,31 @@ import socketserver
 
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/trade-xrp":
+            client = SharkClient()
+            sym = "XRPINR"
+            # Set 60x leverage
+            client.set_leverage(60, sym)
+            # Place 4.5 XRP order (~Rs 560 value, margin is Rs 9.36 at 60x)
+            res = client.place_market_order("BUY", 4.5, sym)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+            if res.get("success"):
+                send_telegram(
+                    "🎉 *LIVE XRP TEST TRADE EXECUTED!* 🚀\n\n"
+                    "• *Asset*: `XRPINR`\n"
+                    "• *Side*: `BUY` 🟢\n"
+                    "• *Quantity*: `4.5 XRP` (~₹560 Value)\n"
+                    "• *Leverage*: `60×`\n"
+                    "• *Margin Used*: `₹9.36 INR` (Under ₹10!)\n\n"
+                    "Aap apne Shark Exchange app me Positions tab me ye live trade dekh sakte hain!"
+                )
+            else:
+                send_telegram(f"❌ *XRP Order Error:*\n`{res.get('error')}`")
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
