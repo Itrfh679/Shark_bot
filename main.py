@@ -428,8 +428,8 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
                         break
 
             if xrp_pos:
-                pos_id = xrp_pos.get("id") or xrp_pos.get("positionId")
-                qty = float(xrp_pos.get("size") or xrp_pos.get("quantity") or 4.5)
+                pos_id = str(xrp_pos.get("positionId") or xrp_pos.get("id"))
+                qty = float(xrp_pos.get("quantity") or xrp_pos.get("positionAmount") or xrp_pos.get("size") or 4.5)
                 # Entry was ~125.12 -> TP 126.90 (+8 Rs profit), SL 123.34 (-8 Rs loss)
                 tp_price = 126.90
                 sl_price = 123.34
