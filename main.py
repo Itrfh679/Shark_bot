@@ -416,6 +416,61 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
                 send_telegram(f"❌ *XRP Order Error:*\n`{res.get('error')}`")
             return
 
+        if self.path == "/set-xrp-tpsl":
+            client = SharkClient()
+            positions = client.get_open_positions()
+            xrp_pos = None
+            pos_list = positions if isinstance(positions, list) else (positions.get("data") or positions.get("result") or [])
+            if isinstance(pos_list, list):
+                for p in pos_list:
+                    if "XRP" in str(p.get("contractPair", "")) or "XRP" in str(p.get("symbol", "")):
+                        xrp_pos = p
+                        break
+
+            if xrp_pos:
+                pos_id = xrp_pos.get("id") or xrp_pos.get("positionId")
+                qty = float(xrp_pos.get("size") or xrp_pos.get("quantity") or 4.5)
+                # Entry was ~125.12 -> TP 126.90 (+8 Rs profit), SL 123.34 (-8 Rs loss)
+                tp_price = 126.90
+                sl_price = 123.34
+                res = client.set_split_tp_sl(pos_id, tp_price, sl_price, qty)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(res).encode())
+                if res.get("success"):
+                    send_telegram(
+                        "🎯 *XRP TEST POSITION: TP & SL SET HO GAYA!* 🛡️\n\n"
+                        f"• *Position ID*: `{pos_id}`\n"
+                        f"• *Quantity*: `{qty} XRP`\n"
+                        f"• *Take Profit (TP)*: `₹{tp_price}` (+₹8.00 Profit Target) 🎯\n"
+                        f"• *Stop Loss (SL)*: `₹{sl_price}` (-₹8.00 Loss Limit) 🛑\n\n"
+                        "Aap Shark Exchange App me Positions me dekh sakte hain, TP aur SL lag chuka hai!"
+                    )
+                else:
+                    send_telegram(f"❌ *TP/SL Set Error:*\n`{res.get('data') or res.get('error')}`")
+            else:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "No open XRP position found in API", "raw": positions}).encode())
+            return
+
+        if self.path == "/close-xrp":
+            client = SharkClient()
+            res = client.close_all_positions()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"closed": res}).encode())
+            if res:
+                send_telegram(
+                    "✅ *XRP TEST POSITION CLOSED!* 🏁\n\n"
+                    "• Shark Exchange par open test position successfully close ho gayi hai.\n"
+                    "• Capital wallet balance me wapas free ho gaya."
+                )
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()

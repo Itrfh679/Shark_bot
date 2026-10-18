@@ -246,6 +246,39 @@ class SharkClient:
             log.error(f"Error closing all positions: {e}")
             return False
 
+    def set_split_tp_sl(self, position_id: str, tp_price: float, sl_price: float, qty: float) -> dict:
+        """
+        Sets Split TP and SL for an open position.
+        """
+        if not self.is_live:
+            return {"success": True, "simulated": True}
+
+        endpoint = "/v2/order/split-tp-sl"
+        ts = str(int(time.time() * 1000))
+        params = {
+            "positionId": str(position_id),
+            "splitTakeProfitOrders": [{
+                "quantity": float(qty),
+                "price": float(tp_price)
+            }],
+            "splitStopLossOrders": [{
+                "quantity": float(qty),
+                "price": float(sl_price)
+            }],
+            "timestamp": ts
+        }
+        body = json.dumps(params, separators=(",", ":"))
+        sig = self._sign_body(params)
+        headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
+
+        try:
+            r = self.session.post(f"{self.base_url}{endpoint}", data=body, headers=headers, timeout=12)
+            log.info(f"Split TP/SL status: {r.status_code}, response: {r.text}")
+            return {"success": r.status_code in [200, 201], "data": r.text}
+        except Exception as e:
+            log.error(f"Error setting split TP/SL: {e}")
+            return {"success": False, "error": str(e)}
+
     def place_bracket_order(self, side: str, qty: float, stop_loss: float, take_profit: float) -> dict:
         """
         Places the entry order and tracks the bracket.
