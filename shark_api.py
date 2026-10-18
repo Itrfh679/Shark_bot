@@ -75,6 +75,7 @@ class SharkClient:
                         "high": float(c["high"]),
                         "low": float(c["low"]),
                         "close": float(c["close"]),
+                        "volume": float(c.get("volume", 0.0) or c.get("size", 0.0) or 0.0),
                     }
                     for c in raw
                 ]
@@ -99,6 +100,7 @@ class SharkClient:
                         "high": float(c["high"]) * 88.0,
                         "low": float(c["low"]) * 88.0,
                         "close": float(c["close"]) * 88.0,
+                        "volume": float(c.get("volume", 0.0) or 0.0),
                     }
                     for c in raw_d
                 ]

@@ -38,3 +38,8 @@ RSI_BUY_MAX        = 66.0
 RSI_SELL_MIN       = 34.0
 RSI_SELL_MAX       = 50.0
 MIN_WICK_RATIO     = 0.45       # Institutional 45%+ Rejection Wick (Rejects weak fakeouts)
+
+# Pushkar Raj Thakur Course Enhancements
+VOLUME_MA_PERIOD     = 20       # 20-period Volume Moving Average
+VOLUME_THRESHOLD_PCT = 1.00     # 1.0x (100%) - Trigger candle volume >= 20-period SMA
+ENABLE_BREAK_EVEN    = True     # Auto shift SL to entry at 1:1 Risk-Reward
