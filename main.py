@@ -178,9 +178,21 @@ class CloudTradingBot:
             msg = "✅ *All Positions Closed Immediately!*" if success else "⚠️ *Close Request Sent!*"
             send_telegram(msg)
 
+        elif cmd_lower in ["/test", "test", "/test_buy"]:
+            send_telegram("⏳ *Executing live ₹10-₹80 test trade on Shark Exchange...*")
+            res = self.client.place_order("BUY", 0.20)
+            if res.get("success"):
+                send_telegram("🎉 *LIVE TEST TRADE SUCCESSFUL!* 🚀\nOrder placed on Shark Exchange!\nClosing in 4 seconds...")
+                time.sleep(4)
+                self.client.close_all_positions()
+                send_telegram("✅ *Test Trade Closed Successfully! IP & API 100% WORKING!* 🏆")
+            else:
+                send_telegram(f"❌ *Test Order Failed:*\n`{res.get('error')}`")
+
         elif cmd_lower in ["/help", "help"]:
             send_telegram(
                 "🤖 *Cloud Trading Bot Commands:*\n\n"
+                "• `/test` - Fire live test trade to verify connection\n"
                 "• `/status` - Live SOL price, trend & trade state\n"
                 "• `/balance` - Shark Exchange wallet balance\n"
                 "• `/start` - Resume 24x7 cloud trading\n"
@@ -391,6 +403,22 @@ import socketserver
 
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/test-trade":
+            client = SharkClient()
+            res = client.place_order("BUY", 0.20)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+            if res.get("success"):
+                send_telegram("🎉 *LIVE TEST TRADE SUCCESSFUL!* 🚀\nOrder placed on Shark Exchange!\nClosing in 4 seconds...")
+                time.sleep(4)
+                client.close_all_positions()
+                send_telegram("✅ *Test Trade Closed Successfully! IP Whitelist & API are 100% OPERATIONAL!* 🏆")
+            else:
+                send_telegram(f"❌ *Test Trade Error:*\n`{res.get('error')}`")
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
