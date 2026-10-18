@@ -186,11 +186,9 @@ class SharkClient:
     # ─────────────────────────────────────────────────────────
     #  ORDER EXECUTION
     # ─────────────────────────────────────────────────────────
-    def place_market_order(self, side: str, qty: float, symbol: str = None) -> dict:
+    def place_market_order(self, side: str, qty: float, symbol: str = None, tp_price: float = None, sl_price: float = None) -> dict:
         """
-        Places market order on Shark Exchange.
-        side: 'BUY' or 'SELL'
-        qty: e.g. 4.5
+        Places market order on Shark Exchange, optionally with TP and SL.
         """
         if not self.is_live:
             return {"success": True, "order_id": f"sim_{int(time.time())}"}
@@ -210,6 +208,11 @@ class SharkClient:
             "deviceType": "WEB",
             "userCategory": "EXTERNAL",
         }
+        if tp_price is not None:
+            payload["takeProfitPrice"] = float(tp_price)
+        if sl_price is not None:
+            payload["stopLossPrice"] = float(sl_price)
+
         body = json.dumps(payload, separators=(",", ":"))
         sig = self._sign_body(payload)
         headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
@@ -218,9 +221,24 @@ class SharkClient:
             r = self.session.post(f"{self.base_url}{endpoint}", data=body, headers=headers, timeout=15)
             if r.status_code in [200, 201]:
                 return {"success": True, "data": r.json()}
-            else:
-                log.error(f"Order placement failed: {r.status_code} - {r.text}")
-                return {"success": False, "error": r.text}
+            
+            # If rejected because of takeProfitPrice/stopLossPrice, retry clean market order
+            if tp_price is not None or sl_price is not None:
+                log.warning(f"Retrying plain market order without bracket params: {r.text}")
+                payload.pop("takeProfitPrice", None)
+                payload.pop("stopLossPrice", None)
+                payload["timestamp"] = str(int(time.time() * 1000))
+                body2 = json.dumps(payload, separators=(",", ":"))
+                sig2 = self._sign_body(payload)
+                headers2 = {"api-key": self.api_key, "signature": sig2, "Content-Type": "application/json", "accept": "*/*"}
+                r2 = self.session.post(f"{self.base_url}{endpoint}", data=body2, headers=headers2, timeout=15)
+                if r2.status_code in [200, 201]:
+                    return {"success": True, "data": r2.json(), "bracket_fallback": True}
+                else:
+                    return {"success": False, "error": r2.text}
+            
+            log.error(f"Order placement failed: {r.status_code} - {r.text}")
+            return {"success": False, "error": r.text}
         except Exception as e:
             log.error(f"Order exception: {e}")
             return {"success": False, "error": str(e)}
