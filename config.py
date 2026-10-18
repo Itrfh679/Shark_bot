@@ -26,7 +26,7 @@ COOLDOWN_LOSS_MINS = 60         # 1-hour patience cooldown after any loss
 # Timeframes & Indicators
 HTF_RESOLUTION     = "15m"
 EMA_HTF            = 200
-EMA_HTF_MIN_SLOPE  = 1.2        # Rejects flat/choppy 15m markets (Only trades clear momentum)
+EMA_HTF_MIN_SLOPE  = 0.6        # Balanced momentum slope (Rejects flat markets while catching smooth trends)
 EMA_HTF_DANGER_PCT = 0.20       # Minimum distance from EMA 200 to confirm trend breakout
 
 LTF_RESOLUTION     = "5m"
@@ -37,7 +37,7 @@ RSI_BUY_MIN        = 50.0
 RSI_BUY_MAX        = 66.0
 RSI_SELL_MIN       = 34.0
 RSI_SELL_MAX       = 50.0
-MIN_WICK_RATIO     = 0.45       # Institutional 45%+ Rejection Wick (Rejects weak fakeouts)
+MIN_WICK_RATIO     = 0.30       # Realistic 30%+ Rejection Wick (Captures solid institutional bounces)
 
 # Pushkar Raj Thakur Course Enhancements
 VOLUME_MA_PERIOD     = 20       # 20-period Volume Moving Average
