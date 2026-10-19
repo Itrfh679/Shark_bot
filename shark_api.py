@@ -26,6 +26,19 @@ socket.getaddrinfo = _ipv4_getaddrinfo
 
 log = logging.getLogger("SharkAPI")
 
+def clean_for_js(obj):
+    """
+    Normalizes Python dict/list/floats so json.dumps matches Node.js JSON.stringify.
+    Specifically converts integer floats (e.g. 10202.0 -> 10202) to match JavaScript number serialization.
+    """
+    if isinstance(obj, dict):
+        return {k: clean_for_js(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_js(v) for v in obj]
+    elif isinstance(obj, float) and obj.is_integer():
+        return int(obj)
+    return obj
+
 class SharkClient:
     def __init__(self):
         self.api_key = SHARK_API_KEY
@@ -47,12 +60,14 @@ class SharkClient:
         ).hexdigest()
 
     def _sign_body(self, payload: dict) -> str:
-        body = json.dumps(payload, separators=(",", ":"))
+        cleaned = clean_for_js(payload)
+        body = json.dumps(cleaned, separators=(",", ":"))
         return hmac.new(
             self.api_secret.encode("utf-8"),
             body.encode("utf-8"),
             hashlib.sha256
         ).hexdigest()
+
 
     # ─────────────────────────────────────────────────────────
     #  MARKET DATA (Native Shark Exchange Candles)
@@ -245,7 +260,7 @@ class SharkClient:
             log.error(f"Order exception: {e}")
             return {"success": False, "error": str(e)}
 
-    def place_limit_order(self, side: str, qty: float, price: float, symbol: str = None, reduce_only: bool = True) -> dict:
+    def place_limit_order(self, side: str, qty: float, price: float, symbol: str = None, reduce_only: bool = True, position_id: str = None) -> dict:
         """
         Places limit order (e.g. Take Profit).
         """
@@ -254,19 +269,21 @@ class SharkClient:
         target_sym = symbol or self.symbol
         endpoint = "/v1/order/place-order"
         ts = str(int(time.time() * 1000))
-        payload = {
+        payload = clean_for_js({
             "timestamp": ts,
-            "placeType": "ORDER_FORM",
+            "placeType": "POSITION" if position_id else "ORDER_FORM",
             "quantity": qty,
             "side": side.upper(),
             "symbol": target_sym,
             "type": "LIMIT",
-            "price": float(price),
+            "price": price,
             "reduceOnly": reduce_only,
             "marginAsset": "INR",
             "deviceType": "WEB",
             "userCategory": "EXTERNAL",
-        }
+        })
+        if position_id:
+            payload["positionId"] = str(position_id)
         body = json.dumps(payload, separators=(",", ":"))
         sig = self._sign_body(payload)
         headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
@@ -277,7 +294,7 @@ class SharkClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def place_stop_market_order(self, side: str, qty: float, stop_price: float, symbol: str = None, reduce_only: bool = True) -> dict:
+    def place_stop_market_order(self, side: str, qty: float, stop_price: float, symbol: str = None, reduce_only: bool = True, position_id: str = None) -> dict:
         """
         Places stop market order (e.g. Stop Loss).
         """
@@ -286,19 +303,21 @@ class SharkClient:
         target_sym = symbol or self.symbol
         endpoint = "/v1/order/place-order"
         ts = str(int(time.time() * 1000))
-        payload = {
+        payload = clean_for_js({
             "timestamp": ts,
-            "placeType": "ORDER_FORM",
+            "placeType": "POSITION" if position_id else "ORDER_FORM",
             "quantity": qty,
             "side": side.upper(),
             "symbol": target_sym,
             "type": "STOP_MARKET",
-            "stopPrice": float(stop_price),
+            "stopPrice": stop_price,
             "reduceOnly": reduce_only,
             "marginAsset": "INR",
             "deviceType": "WEB",
             "userCategory": "EXTERNAL",
-        }
+        })
+        if position_id:
+            payload["positionId"] = str(position_id)
         body = json.dumps(payload, separators=(",", ":"))
         sig = self._sign_body(payload)
         headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
@@ -318,7 +337,7 @@ class SharkClient:
 
         endpoint = "/v1/positions/close-all-positions"
         ts = str(int(time.time() * 1000))
-        payload = {"timestamp": ts}
+        payload = clean_for_js({"timestamp": ts})
         body = json.dumps(payload, separators=(",", ":"))
         sig = self._sign_body(payload)
         headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
@@ -339,18 +358,18 @@ class SharkClient:
 
         endpoint = "/v2/order/split-tp-sl"
         ts = str(int(time.time() * 1000))
-        params = {
+        params = clean_for_js({
             "positionId": str(position_id),
             "splitTakeProfitOrders": [{
-                "quantity": float(qty),
-                "price": float(tp_price)
+                "quantity": qty,
+                "price": tp_price
             }],
             "splitStopLossOrders": [{
-                "quantity": float(qty),
-                "price": float(sl_price)
+                "quantity": qty,
+                "price": sl_price
             }],
             "timestamp": ts
-        }
+        })
         body = json.dumps(params, separators=(",", ":"))
         sig = self._sign_body(params)
         headers = {"api-key": self.api_key, "signature": sig, "Content-Type": "application/json", "accept": "*/*"}
@@ -405,8 +424,8 @@ class SharkClient:
         if not split_res.get("success"):
             exit_side = "SELL" if pos_type == "LONG" else "BUY"
             log.warning(f"Split TP/SL API did not return 200/201. Placing fallback reduce-only orders for {target_sym}")
-            r_tp = self.place_limit_order(exit_side, qty, tp_price, target_sym, reduce_only=True)
-            r_sl = self.place_stop_market_order(exit_side, qty, sl_price, target_sym, reduce_only=True)
+            r_tp = self.place_limit_order(exit_side, qty, tp_price, target_sym, reduce_only=True, position_id=pos_id)
+            r_sl = self.place_stop_market_order(exit_side, qty, sl_price, target_sym, reduce_only=True, position_id=pos_id)
             fallback_res = {"tp_order": r_tp, "sl_order": r_sl}
 
         is_success = split_res.get("success") or (fallback_res.get("tp_order", {}).get("success") and fallback_res.get("sl_order", {}).get("success"))
