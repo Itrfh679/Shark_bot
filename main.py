@@ -19,13 +19,10 @@ import requests
 from config import (
     SHARK_API_KEY, SHARK_API_SECRET, SHARK_BASE_URL, SYMBOL,
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-    LEVERAGE, CONTRACT_QTY, RISK_PER_TRADE_INR, MIN_CONTRACT_QTY, MAX_CONTRACT_QTY,
-    MAX_TRADES_PER_DAY, RISK_REWARD_RATIO,
-    MIN_SL_POINTS, MAX_SL_POINTS, SL_BUFFER_POINTS, COOLDOWN_LOSS_MINS,
-    HTF_RESOLUTION, EMA_HTF, EMA_HTF_MIN_SLOPE, EMA_HTF_DANGER_PCT,
-    LTF_RESOLUTION, EMA_FAST, EMA_SLOW, RSI_PERIOD,
-    RSI_BUY_MIN, RSI_BUY_MAX, RSI_SELL_MIN, RSI_SELL_MAX, MIN_WICK_RATIO,
-    VOLUME_MA_PERIOD, VOLUME_THRESHOLD_PCT, ENABLE_VOLUME_FILTER, ENABLE_BREAK_EVEN
+    LEVERAGE, CONTRACT_QTY, MARGIN_REQUIRED, MAX_LOSSES_PER_DAY,
+    MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
+    RESOLUTION, EMA_PERIOD, RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
+    EMA_STRETCH_PCT, SL_PCT, TP_PCT
 )
 from shark_api import SharkClient
 
@@ -287,8 +284,10 @@ class CloudTradingBot:
             send_telegram(
                 "🟢 *Cloud Bot Started / Resumed!*\n\n"
                 f"• Asset: `{SYMBOL}`\n"
-                f"• Leverage: `{LEVERAGE}×`\n"
-                f"• Strategy: 15m EMA 200 + 5m Pullback + RSI\n"
+                f"• Strategy: 15m Elastic Mean Reversion (Rubber-Band)\n"
+                f"• Size: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
+                f"• Stop Loss: {SL_PCT}% | Take Profit: {TP_PCT}%\n"
+                f"• Daily Limits: Max {MAX_LOSSES_PER_DAY} Losses / Max {MAX_TRADES_PER_DAY} Trades\n"
                 f"• Status: Active 24x7 scanning in Cloud."
             )
 
@@ -297,11 +296,10 @@ class CloudTradingBot:
             send_telegram("⏸️ *Cloud Bot Paused!*\nScanning stopped. Send `/start` to resume.")
 
         elif cmd_lower in ["/status", "status"]:
-            c5m = self.client.get_candles(LTF_RESOLUTION, 5)
-            curr_price = c5m[-1]["close"] if c5m else 0.0
+            c15m = self.client.get_candles(RESOLUTION, 5)
+            curr_price = c15m[-1]["close"] if c15m else 0.0
             if self.active_trade:
-                be_tag = " [🛡️ Break-Even Active]" if self.active_trade.get("breakeven_set") else ""
-                pos_text = f"{self.active_trade['side']} (Entry: ₹{self.active_trade['entry']:,.0f}, SL: ₹{self.active_trade['sl']:,.0f}){be_tag}"
+                pos_text = f"{self.active_trade['side']} (Entry: ₹{self.active_trade['entry']:,.0f}, SL: ₹{self.active_trade['sl']:,.0f}, TP: ₹{self.active_trade['target']:,.0f})"
             else:
                 pos_text = "No Open Trade (Waiting Setup)"
             state = "🟢 RUNNING" if self.is_running else "⏸️ PAUSED"
@@ -311,7 +309,7 @@ class CloudTradingBot:
                 f"• *Cloud Server IP*: `{self.public_ip}`\n"
                 f"• *Current SOL Price*: ₹{curr_price:,.0f} INR\n"
                 f"• *Active Position*: {pos_text}\n"
-                f"• *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
+                f"• *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
                 f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*\n"
                 f"• *Uptime*: 24×7 Cloud Active (No phone needed)"
             )
@@ -322,8 +320,8 @@ class CloudTradingBot:
                 f"💳 *Shark Exchange Wallet Balance*\n\n"
                 f"• *Futures Wallet Balance*: *₹{bal:,.2f} INR*\n"
                 f"• *Capital Allocated*: ₹1,000 INR\n"
-                f"• *Margin per Trade*: ~₹160 INR (at {LEVERAGE}×)\n"
-                f"• *Free Safe Buffer*: ~₹840 INR"
+                f"• *Margin per Trade*: ~₹{MARGIN_REQUIRED:.0f} INR (at {LEVERAGE}×)\n"
+                f"• *Free Safe Buffer*: ~₹{max(0, bal - MARGIN_REQUIRED):,.0f} INR (Safe in reserve)"
             )
 
         elif cmd_lower in ["/close", "close"]:
@@ -335,7 +333,7 @@ class CloudTradingBot:
         elif cmd_lower in ["/help", "help"]:
             send_telegram(
                 "🤖 *Cloud Trading Bot Commands:*\n\n"
-                "• `/status` - Live SOL price, trend & trade state\n"
+                "• `/status` - Live SOL price & strategy state\n"
                 "• `/balance` - Shark Exchange wallet balance\n"
                 "• `/start` - Resume 24x7 cloud trading\n"
                 "• `/stop` - Pause bot trading\n"
@@ -354,10 +352,11 @@ class CloudTradingBot:
             f"🦈 *SHARK EXCHANGE 24x7 CLOUD BOT ONLINE!* ☁️\n\n"
             f"• *Cloud Server IP*: `{self.public_ip}`\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Leverage*: `{LEVERAGE}×`\n"
-            f"• *Risk*: Strictly ₹15 - ₹30 per trade 🛑\n"
-            f"• *Target (1:{RISK_REWARD_RATIO})*: Strictly ₹50 - ₹70 per trade 🎯\n"
-            f"• *Daily Limit*: Max {MAX_TRADES_PER_DAY} Trades / Day 🔒\n"
+            f"• *Strategy*: 15m Elastic Mean Reversion (Rubber-Band)\n"
+            f"• *Trade Size*: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
+            f"• *Stop Loss*: {SL_PCT}% (~120 pts, ~₹45 Net Risk) 🛑\n"
+            f"• *Take Profit*: {TP_PCT}% (~120 pts, ~₹45 Net Reward) 🎯\n"
+            f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Circuit Breaker) | Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
             f"• *Phone Status*: You can close your phone/Termux now! 📱💤\n\n"
             f"👉 Send `/status` or `/balance` anytime to inspect!"
         )
@@ -378,96 +377,56 @@ class CloudTradingBot:
         # Sync open positions with exchange
         self.sync_active_trade_from_exchange()
 
-        # Fetch candles
-        c15m = self.client.get_candles(HTF_RESOLUTION, 220)
-        c5m  = self.client.get_candles(LTF_RESOLUTION, 70)
-
-        if len(c15m) < 205 or len(c5m) < 55:
+        # Fetch 15m candles
+        c15m = self.client.get_candles(RESOLUTION, 80)
+        if len(c15m) < 30:
             return
 
         closes_15m = [c["close"] for c in c15m]
-        ema200_15m = calc_ema(closes_15m, EMA_HTF)
-        e200_curr   = ema200_15m[-1]
-        e200_prev   = ema200_15m[-2]
-        slope_15m   = e200_curr - e200_prev
+        ema20_15m  = calc_ema(closes_15m, EMA_PERIOD)
+        rsi        = calc_rsi(closes_15m, RSI_PERIOD)
 
-        closes_5m = [c["close"] for c in c5m]
-        ema20_5m  = calc_ema(closes_5m, EMA_FAST)
-        ema50_5m  = calc_ema(closes_5m, EMA_SLOW)
-        rsi       = calc_rsi(closes_5m, RSI_PERIOD)
-
-        curr_5m   = c5m[-1]
-        prev_5m   = c5m[-2]
-        sol_price = curr_5m["close"]
-
-        # Volume Confirmation Filter (Pushkar Raj Thakur Course Feature 2)
-        volumes_5m = [c.get("volume", 0.0) for c in c5m]
-        avg_vol_20 = sum(volumes_5m[-VOLUME_MA_PERIOD-1:-1]) / float(VOLUME_MA_PERIOD) if len(volumes_5m) > VOLUME_MA_PERIOD else (sum(volumes_5m) / max(len(volumes_5m), 1))
-        curr_vol   = curr_5m.get("volume", 0.0)
-        vol_confirmed = (curr_vol >= avg_vol_20 * VOLUME_THRESHOLD_PCT) if (ENABLE_VOLUME_FILTER and avg_vol_20 > 0) else True
-
-        htf_dist = abs(sol_price - e200_curr) / sol_price * 100.0
-        htf_bullish = (sol_price > e200_curr) and (slope_15m >= EMA_HTF_MIN_SLOPE) and (htf_dist >= EMA_HTF_DANGER_PCT)
-        htf_bearish = (sol_price < e200_curr) and (slope_15m <= -EMA_HTF_MIN_SLOPE) and (htf_dist >= EMA_HTF_DANGER_PCT)
+        curr_candle = c15m[-1]
+        sol_price   = curr_candle["close"]
+        ema_val     = ema20_15m[-1]
+        dist_pct    = ((sol_price - ema_val) / ema_val) * 100.0
 
         # Heartbeat every 1 hour
         now = time.time()
         if now - self.last_heartbeat_time >= 3600:
             self.last_heartbeat_time = now
-            pos_str = f"{self.active_trade['side']} (₹{self.active_trade['entry']:,.0f})" if self.active_trade else "No Open Trade (Waiting A+)"
+            pos_str = f"{self.active_trade['side']} (₹{self.active_trade['entry']:,.0f})" if self.active_trade else "No Open Trade (Waiting Setup)"
             send_telegram(
                 f"💓 *Shark Cloud Bot Heartbeat (Active)* 🟢\n\n"
                 f"• *SOL Price*: ₹{sol_price:,.0f} INR\n"
+                f"• *15m RSI*: {rsi:.1f} | *EMA 20*: ₹{ema_val:,.0f} ({dist_pct:+.2f}%)\n"
                 f"• *Status*: {pos_str}\n"
-                f"• *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
+                f"• *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
                 f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*\n"
                 f"• *Cloud Host*: Online 24×7 🛡️"
             )
 
-        # Active trade exit & auto break-even check
+        # Active trade exit check
         if self.active_trade:
-            side     = self.active_trade["side"]
-            entry    = self.active_trade["entry"]
-            sl       = self.active_trade["sl"]
-            tgt      = self.active_trade["target"]
-            qty      = self.active_trade.get("qty", CONTRACT_QTY)
-            risk_pts = self.active_trade.get("risk_pts", abs(entry - sl))
-
-            # Auto Break-Even Shift (Pushkar Raj Thakur Course Feature 1)
-            # When trade reaches 1:1 Risk-Reward distance, shift SL to entry price
-            if ENABLE_BREAK_EVEN and not self.active_trade.get("breakeven_set"):
-                be_reached = False
-                if side == "BUY" and curr_5m["high"] >= (entry + risk_pts):
-                    be_reached = True
-                elif side == "SELL" and curr_5m["low"] <= (entry - risk_pts):
-                    be_reached = True
-
-                if be_reached:
-                    self.active_trade["sl"] = entry
-                    self.active_trade["breakeven_set"] = True
-                    sl = entry
-                    log.info(f"Auto Break-Even triggered for {side} at entry ₹{entry}")
-                    send_telegram(
-                        f"🛡️ *AUTO BREAK-EVEN ACTIVATED (100% RISK-FREE!)* 🛡️\n\n"
-                        f"• *Asset*: `{SYMBOL}`\n"
-                        f"• *Side*: `{side}` ({qty} SOL)\n"
-                        f"• *Entry Price*: ₹{entry:,.0f} INR\n"
-                        f"• *Milestone*: Reached 1:1 Risk-Reward (+₹{risk_pts * qty:.1f} unrealized gain!)\n"
-                        f"• *New Stop Loss*: *₹{entry:,.0f} INR (Entry Price)*\n\n"
-                        f"🎉 Ab is trade me ₹1 ka bhi loss nahi ho sakta! Zero-Risk Mode Enabled!"
-                    )
+            side  = self.active_trade["side"]
+            entry = self.active_trade["entry"]
+            sl    = self.active_trade["sl"]
+            tgt   = self.active_trade["target"]
+            qty   = self.active_trade.get("qty", CONTRACT_QTY)
 
             trade_closed = False
             is_win = False
+            exit_price = 0.0
+
             if side == "BUY":
-                if curr_5m["low"] <= sl:
+                if curr_candle["low"] <= sl:
                     trade_closed, is_win, exit_price = True, False, sl
-                elif curr_5m["high"] >= tgt:
+                elif curr_candle["high"] >= tgt:
                     trade_closed, is_win, exit_price = True, True, tgt
             else:
-                if curr_5m["high"] >= sl:
+                if curr_candle["high"] >= sl:
                     trade_closed, is_win, exit_price = True, False, sl
-                elif curr_5m["low"] <= tgt:
+                elif curr_candle["low"] <= tgt:
                     trade_closed, is_win, exit_price = True, True, tgt
 
             if trade_closed:
@@ -478,21 +437,23 @@ class CloudTradingBot:
 
                 if is_win:
                     self.daily_stats["wins_today"] += 1
-                    outcome_str, outcome_emoji = "PROFIT TARGET 🎯", "🎉"
-                elif self.active_trade.get("breakeven_set") and abs(exit_price - entry) <= 2.0:
-                    outcome_str, outcome_emoji = "BREAK-EVEN (ZERO LOSS) 🛡️", "🛡️"
+                    outcome_str, outcome_emoji = f"PROFIT TARGET ({TP_PCT}%) 🎯", "🎉"
                 else:
                     self.daily_stats["losses_today"] += 1
-                    outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
+                    outcome_str, outcome_emoji = f"STOP LOSS ({SL_PCT}%) 🛑", "🛑"
                     self.last_loss_time = time.time()
                 self._save_daily_stats()
 
-                # Ensure exchange market order executes in case limit/stop orders are pending (Reduce-Only to prevent accidental reverse positions)
+                # Ensure exchange market order executes to close position
                 try:
                     exit_side = "SELL" if side == "BUY" else "BUY"
                     self.client.place_market_order(exit_side, qty, reduce_only=True)
                 except Exception as ex_err:
                     log.error(f"Error executing market close on exchange: {ex_err}")
+
+                loss_warning = ""
+                if self.daily_stats.get("losses_today", 0) >= MAX_LOSSES_PER_DAY:
+                    loss_warning = f"\n🔒 *DAILY LOSS LIMIT REACHED ({MAX_LOSSES_PER_DAY} Losses)!* Bot locked until tomorrow to protect capital."
 
                 send_telegram(
                     f"🏁 *TRADE CLOSED ({outcome_str})* {outcome_emoji}\n\n"
@@ -501,74 +462,54 @@ class CloudTradingBot:
                     f"• *Exit Price*: ₹{exit_price:,.0f} INR\n"
                     f"• *Net P&L*: *₹{pnl_inr:+.1f} INR* {outcome_emoji}\n\n"
                     f"📊 *Scorecard Today:*\n"
-                    f"• Trades: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
-                    f"• Today P&L: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*"
+                    f"• Trades: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Wins: {self.daily_stats['wins_today']}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
+                    f"• Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*{loss_warning}"
                 )
                 self.active_trade = None
             return
 
         # Entry constraints
+        if self.daily_stats.get("losses_today", 0) >= MAX_LOSSES_PER_DAY:
+            return
         if self.daily_stats["trades_today"] >= MAX_TRADES_PER_DAY:
             return
         if self.last_loss_time > 0 and (time.time() - self.last_loss_time < COOLDOWN_LOSS_MINS * 60):
             return
-        if curr_5m["time"] == self.last_candle_time:
+        if curr_candle["time"] == self.last_candle_time:
             return
 
-        # Rejection & pullback check
-        c_range = max(curr_5m["high"] - curr_5m["low"], 0.001)
-        lower_wick = min(curr_5m["open"], curr_5m["close"]) - curr_5m["low"]
-        upper_wick = curr_5m["high"] - max(curr_5m["open"], curr_5m["close"])
-        bull_rej = (lower_wick / c_range) >= MIN_WICK_RATIO
-        bear_rej = (upper_wick / c_range) >= MIN_WICK_RATIO
-
-        e20, e50 = ema20_5m[-1], ema50_5m[-1]
-        pullback_bull = (min(curr_5m["low"], prev_5m["low"]) <= e20) and (curr_5m["close"] >= e20)
-        pullback_bear = (max(curr_5m["high"], prev_5m["high"]) >= e20) and (curr_5m["close"] <= e20)
-
+        # 15m Elastic Mean Reversion Entry Signals
         signal = None
-        if htf_bullish and (e20 > e50) and pullback_bull and bull_rej and (RSI_BUY_MIN <= rsi <= RSI_BUY_MAX) and vol_confirmed:
+        if rsi <= RSI_OVERSOLD and dist_pct <= -EMA_STRETCH_PCT:
             signal = "BUY"
-        elif htf_bearish and (e20 < e50) and pullback_bear and bear_rej and (RSI_SELL_MIN <= rsi <= RSI_SELL_MAX) and vol_confirmed:
+        elif rsi >= RSI_OVERBOUGHT and dist_pct >= EMA_STRETCH_PCT:
             signal = "SELL"
 
         if not signal:
             return
 
-        lookback = 5
-        swing_low  = min(c5m[j]["low"] for j in range(len(c5m) - lookback, len(c5m)))
-        swing_high = max(c5m[j]["high"] for j in range(len(c5m) - lookback, len(c5m)))
-
         entry = sol_price
         if signal == "BUY":
-            sl = swing_low - SL_BUFFER_POINTS
-            risk = entry - sl
-            if not (MIN_SL_POINTS <= risk <= MAX_SL_POINTS):
-                return
-            target = entry + (risk * RISK_REWARD_RATIO)
+            sl = round(entry * (1.0 - SL_PCT / 100.0), 2)
+            target = round(entry * (1.0 + TP_PCT / 100.0), 2)
         else:
-            sl = swing_high + SL_BUFFER_POINTS
-            risk = sl - entry
-            if not (MIN_SL_POINTS <= risk <= MAX_SL_POINTS):
-                return
-            target = entry - (risk * RISK_REWARD_RATIO)
+            sl = round(entry * (1.0 + SL_PCT / 100.0), 2)
+            target = round(entry * (1.0 - TP_PCT / 100.0), 2)
 
-        # Dynamic Position Sizing Formula: Quantity = Risk (₹40) / Stop Loss Distance (Points)
-        raw_qty = RISK_PER_TRADE_INR / max(risk, 1.0)
-        trade_qty = round(max(MIN_CONTRACT_QTY, min(raw_qty, MAX_CONTRACT_QTY)), 2)
-        expected_risk = risk * trade_qty
-        expected_reward = (risk * RISK_REWARD_RATIO) * trade_qty
-        margin_required = (entry * trade_qty) / LEVERAGE
+        risk_pts = abs(entry - sl)
+        expected_risk = risk_pts * CONTRACT_QTY
+        expected_reward = abs(entry - target) * CONTRACT_QTY
+        margin_required = (entry * CONTRACT_QTY) / LEVERAGE
 
         # Place Order
-        res = self.client.place_bracket_order(signal, trade_qty, sl, target)
+        res = self.client.place_bracket_order(signal, CONTRACT_QTY, sl, target)
         if not res.get("success"):
             raw_err = str(res.get("raw", {}).get("error", "Rejected"))
             log.error(f"Order failed on exchange: {raw_err}")
             send_telegram(f"⚠️ *Order Blocked by Exchange!*\nReason: `{raw_err}`")
             return
 
-        self.last_candle_time = curr_5m["time"]
+        self.last_candle_time = curr_candle["time"]
         self.daily_stats["trades_today"] += 1
         self._save_daily_stats()
         self.active_trade = {
@@ -576,21 +517,22 @@ class CloudTradingBot:
             "entry": entry,
             "sl": sl,
             "target": target,
-            "qty": trade_qty,
-            "risk_pts": risk,
-            "breakeven_set": False
+            "qty": CONTRACT_QTY,
+            "risk_pts": risk_pts
         }
 
         send_telegram(
             f"🚀 *A+ {signal} ORDER EXECUTED ON SHARK!* 🦈\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Side*: `{signal}` 🟢\n"
-            f"• *Dynamic Size*: `{trade_qty} SOL` (~₹{margin_required:,.0f} Margin at {LEVERAGE}×)\n"
+            f"• *Strategy*: 15m Elastic Mean Reversion (Rubber-Band)\n"
+            f"• *Side*: `{signal}` ({CONTRACT_QTY} SOL)\n"
+            f"• *Margin Used*: ~₹{margin_required:,.0f} INR (at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
-            f"• *Stop Loss*: ₹{sl:,.0f} (-₹{expected_risk:.1f} Risk [~₹{RISK_PER_TRADE_INR:.0f}]) 🛑\n"
-            f"• *Target (1:{RISK_REWARD_RATIO})*: ₹{target:,.0f} (+₹{expected_reward:.1f} Profit) 🎯\n\n"
-            f"📈 Trades Today: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
-            f"🛡️ Dynamic Risk & ₹60 Profit Target Active 🔒"
+            f"• *Stop Loss ({SL_PCT}%)*: ₹{sl:,.0f} (-₹{expected_risk:.1f} Net Risk) 🛑\n"
+            f"• *Target ({TP_PCT}%)*: ₹{target:,.0f} (+₹{expected_reward:.1f} Net Target) 🎯\n"
+            f"• *15m RSI*: {rsi:.1f} (Stretch: {dist_pct:+.2f}% from EMA 20)\n\n"
+            f"📊 *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
+            f"🛡️ *Wallet Backup*: ~₹800+ safe in reserve!"
         )
 
 import http.server

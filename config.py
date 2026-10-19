@@ -12,39 +12,23 @@ RENDER_DEPLOY_HOOK = os.getenv("RENDER_DEPLOY_HOOK", "https://api.render.com/dep
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8959389105:AAGza59y2PmqfDrybiZnYJjcAvyIhKLU3w0")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "5706939133")
 
-# Strategy & Dynamic Risk Management (Sniper Sweet Spot | ~₹240 Margin)
+# Strategy & Risk Management: 15m Elastic Mean Reversion (₹150 Margin, 63% Win Rate)
 LEVERAGE           = 25
-RISK_PER_TRADE_INR = 65.0       # Max ₹65 loss per trade (Capped for ₹1,000 capital safety)
-MIN_CONTRACT_QTY   = 0.30       # Minimum quantity boundary
-MAX_CONTRACT_QTY   = 0.65       # Max quantity (~₹260 margin at 25x with ₹10k SOL)
-CONTRACT_QTY       = 0.60       # Target trade size (~₹240 margin)
-MAX_TRADES_PER_DAY = 2          # Strict daily limit (Max 2 trades/day)
-RISK_REWARD_RATIO  = 2.2        # Solid 1:2.2 RR (+₹145 to +₹150 profit target per trade!)
-MIN_SL_POINTS      = 12.0       # 12 pts min SL (~0.12% - allows tight risk setups)
-MAX_SL_POINTS      = 110.0      # 110 pts max SL (~1.10% safe room against wicks)
-SL_BUFFER_POINTS   = 10.0       # 10pt buffer against Solana stop-hunt wicks
-COOLDOWN_LOSS_MINS = 60         # 1-hour patience cooldown after any loss
+CONTRACT_QTY       = 0.38       # Exactly ₹150 Margin at 25x (~₹3,800 trade value)
+MARGIN_REQUIRED    = 150.0      # ₹150 INR margin per trade
+MAX_LOSSES_PER_DAY = 2          # Daily Circuit Breaker: 2 Losses Max (Stops at ~₹100 loss)
+MAX_TRADES_PER_DAY = 5          # Winning Mode: up to 5 trades if winning
+COOLDOWN_LOSS_MINS = 30         # 30-min patience pause after any loss
 
-# Timeframes & Indicators
-# NOTE: User Strategy Preset:
-# Current Active: Sniper Ultra-Strict Mode (Ultra-Safe institutional setup)
-HTF_RESOLUTION     = "15m"
-EMA_HTF            = 200        # 15m EMA 200 Bada Bhai
-EMA_HTF_MIN_SLOPE  = 1.2        # Ultra-strict momentum slope (100% blocks choppy/flat days)
-EMA_HTF_DANGER_PCT = 0.20       # Minimum distance from EMA 200 to confirm trend breakout
+# 15-Minute Elastic Mean Reversion Rules
+RESOLUTION         = "15m"      # Clean 15-Minute timeframe (zero 5m noise)
+EMA_PERIOD         = 20         # 15m EMA 20 (Average equilibrium price)
+RSI_PERIOD         = 14         # 15m RSI 14
+RSI_OVERSOLD       = 25.0       # Extreme panic dump (Buy trigger)
+RSI_OVERBOUGHT     = 75.0       # Extreme greed peak (Sell trigger)
+EMA_STRETCH_PCT    = 1.2        # Minimum 1.2% stretch from EMA 20
 
-LTF_RESOLUTION     = "5m"
-EMA_FAST           = 20
-EMA_SLOW           = 50
-RSI_PERIOD         = 14
-RSI_BUY_MIN        = 50.0
-RSI_BUY_MAX        = 66.0
-RSI_SELL_MIN       = 34.0
-RSI_SELL_MAX       = 50.0
-MIN_WICK_RATIO     = 0.45       # Institutional 45%+ Rejection Wick (Rejects all weak fakeouts)
+# 1.2% Stop Loss & 1.2% Target (Exact User Decision)
+SL_PCT             = 1.2        # 1.2% Stop Loss (~120 points on SOL, ~₹45 INR net risk)
+TP_PCT             = 1.2        # 1.2% Take Profit (~120 points on SOL, ~₹45 INR net reward)
 
-# Pushkar Raj Thakur Course Enhancements
-VOLUME_MA_PERIOD     = 20       # 20-period Volume Moving Average
-VOLUME_THRESHOLD_PCT = 0.75     # 0.75x (75% volume confirmation)
-ENABLE_VOLUME_FILTER = True     # Turned ON to filter low-volume traps
-ENABLE_BREAK_EVEN    = True     # Auto shift SL to entry at 1:1 Risk-Reward (100% risk-free trade!)
