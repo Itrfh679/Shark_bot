@@ -19,10 +19,11 @@ import requests
 from config import (
     SHARK_API_KEY, SHARK_API_SECRET, SHARK_BASE_URL, SYMBOL,
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-    LEVERAGE, CONTRACT_QTY, MARGIN_REQUIRED, MAX_LOSSES_PER_DAY,
-    MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
+    LEVERAGE, CONTRACT_QTY, MARGIN_REQUIRED,
+    MAX_LOSS_PER_TRADE_INR, MAX_PROFIT_PER_TRADE_INR,
+    MAX_LOSSES_PER_DAY, MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
     RESOLUTION, EMA_PERIOD, RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
-    EMA_STRETCH_PCT, SL_PCT, TP_PCT
+    EMA_STRETCH_PCT
 )
 from shark_api import SharkClient
 
@@ -286,8 +287,9 @@ class CloudTradingBot:
                 f"• Asset: `{SYMBOL}`\n"
                 f"• Strategy: 15m Elastic Mean Reversion (Rubber-Band)\n"
                 f"• Size: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
-                f"• Stop Loss: {SL_PCT}% | Take Profit: {TP_PCT}%\n"
-                f"• Daily Limits: Max {MAX_LOSSES_PER_DAY} Losses / Max {MAX_TRADES_PER_DAY} Trades\n"
+                f"• Stop Loss: ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
+                f"• Take Profit: +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit (1:2.0 RR) 🎯\n"
+                f"• Daily Limits: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) / Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
                 f"• Status: Active 24x7 scanning in Cloud."
             )
 
@@ -354,9 +356,9 @@ class CloudTradingBot:
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
             f"• *Strategy*: 15m Elastic Mean Reversion (Rubber-Band)\n"
             f"• *Trade Size*: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
-            f"• *Stop Loss*: {SL_PCT}% (~120 pts, ~₹45 Net Risk) 🛑\n"
-            f"• *Take Profit*: {TP_PCT}% (~120 pts, ~₹45 Net Reward) 🎯\n"
-            f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Circuit Breaker) | Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
+            f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
+            f"• *Take Profit*: Exact +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit (1:2.0 RR) 🎯\n"
+            f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
             f"• *Phone Status*: You can close your phone/Termux now! 📱💤\n\n"
             f"👉 Send `/status` or `/balance` anytime to inspect!"
         )
@@ -437,10 +439,10 @@ class CloudTradingBot:
 
                 if is_win:
                     self.daily_stats["wins_today"] += 1
-                    outcome_str, outcome_emoji = f"PROFIT TARGET ({TP_PCT}%) 🎯", "🎉"
+                    outcome_str, outcome_emoji = f"PROFIT TARGET (+₹{MAX_PROFIT_PER_TRADE_INR:.0f}) 🎯", "🎉"
                 else:
                     self.daily_stats["losses_today"] += 1
-                    outcome_str, outcome_emoji = f"STOP LOSS ({SL_PCT}%) 🛑", "🛑"
+                    outcome_str, outcome_emoji = f"STOP LOSS (-₹{MAX_LOSS_PER_TRADE_INR:.0f}) 🛑", "🛑"
                     self.last_loss_time = time.time()
                 self._save_daily_stats()
 
@@ -489,12 +491,15 @@ class CloudTradingBot:
             return
 
         entry = sol_price
+        sl_pts = round(MAX_LOSS_PER_TRADE_INR / CONTRACT_QTY, 2)
+        tp_pts = round(MAX_PROFIT_PER_TRADE_INR / CONTRACT_QTY, 2)
+
         if signal == "BUY":
-            sl = round(entry * (1.0 - SL_PCT / 100.0), 2)
-            target = round(entry * (1.0 + TP_PCT / 100.0), 2)
+            sl = round(entry - sl_pts, 2)
+            target = round(entry + tp_pts, 2)
         else:
-            sl = round(entry * (1.0 + SL_PCT / 100.0), 2)
-            target = round(entry * (1.0 - TP_PCT / 100.0), 2)
+            sl = round(entry + sl_pts, 2)
+            target = round(entry - tp_pts, 2)
 
         risk_pts = abs(entry - sl)
         expected_risk = risk_pts * CONTRACT_QTY
@@ -524,12 +529,12 @@ class CloudTradingBot:
         send_telegram(
             f"🚀 *A+ {signal} ORDER EXECUTED ON SHARK!* 🦈\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Strategy*: 15m Elastic Mean Reversion (Rubber-Band)\n"
+            f"• *Strategy*: 15m Elastic Mean Reversion\n"
             f"• *Side*: `{signal}` ({CONTRACT_QTY} SOL)\n"
             f"• *Margin Used*: ~₹{margin_required:,.0f} INR (at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
-            f"• *Stop Loss ({SL_PCT}%)*: ₹{sl:,.0f} (-₹{expected_risk:.1f} Net Risk) 🛑\n"
-            f"• *Target ({TP_PCT}%)*: ₹{target:,.0f} (+₹{expected_reward:.1f} Net Target) 🎯\n"
+            f"• *Stop Loss*: ₹{sl:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss) 🛑\n"
+            f"• *Target*: ₹{target:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit) 🎯\n"
             f"• *15m RSI*: {rsi:.1f} (Stretch: {dist_pct:+.2f}% from EMA 20)\n\n"
             f"📊 *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
             f"🛡️ *Wallet Backup*: ~₹800+ safe in reserve!"
