@@ -82,14 +82,35 @@ class CloudTradingBot:
         self.last_candle_time = 0
         self.last_loss_time = 0
         self.last_heartbeat_time = 0
-        self.daily_stats = {
-            "date": time.strftime("%Y-%m-%d"),
+        self.stats_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "daily_stats.json")
+        self.daily_stats = self._load_daily_stats()
+
+    def _load_daily_stats(self) -> dict:
+        today = time.strftime("%Y-%m-%d")
+        default_stats = {
+            "date": today,
             "trades_today": 0,
             "wins_today": 0,
             "losses_today": 0,
             "pnl_inr_today": 0.0,
             "total_month_pnl_inr": 0.0
         }
+        if os.path.exists(self.stats_file):
+            try:
+                with open(self.stats_file, "r") as f:
+                    data = json.load(f)
+                if data.get("date") == today:
+                    return data
+            except Exception as e:
+                log.warning(f"Error loading daily stats: {e}")
+        return default_stats
+
+    def _save_daily_stats(self):
+        try:
+            with open(self.stats_file, "w") as f:
+                json.dump(self.daily_stats, f, indent=2)
+        except Exception as e:
+            log.warning(f"Error saving daily stats: {e}")
 
     def detect_public_ip(self):
         try:
@@ -107,6 +128,7 @@ class CloudTradingBot:
             self.daily_stats["wins_today"] = 0
             self.daily_stats["losses_today"] = 0
             self.daily_stats["pnl_inr_today"] = 0.0
+            self._save_daily_stats()
 
     def sync_active_trade_from_exchange(self):
         """
@@ -213,6 +235,7 @@ class CloudTradingBot:
                     else:
                         self.daily_stats["losses_today"] += 1
                         self.last_loss_time = time.time()
+                    self._save_daily_stats()
 
                     cooldown_text = "\n• *Cooldown*: 60 min patient wait active ⏳" if not is_win else ""
                     send_telegram(
@@ -462,6 +485,7 @@ class CloudTradingBot:
                     self.daily_stats["losses_today"] += 1
                     outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
                     self.last_loss_time = time.time()
+                self._save_daily_stats()
 
                 # Ensure exchange market order executes in case limit/stop orders are pending (Reduce-Only to prevent accidental reverse positions)
                 try:
@@ -546,6 +570,7 @@ class CloudTradingBot:
 
         self.last_candle_time = curr_5m["time"]
         self.daily_stats["trades_today"] += 1
+        self._save_daily_stats()
         self.active_trade = {
             "side": signal,
             "entry": entry,
