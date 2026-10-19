@@ -18,8 +18,8 @@ RISK_PER_TRADE_INR = 40.0       # Realistic ₹38-₹40 loss per trade (Safely i
 MIN_CONTRACT_QTY   = 0.20       # Minimum quantity boundary
 MAX_CONTRACT_QTY   = 0.40       # Max quantity (~₹150 margin at 25x with ₹10k SOL)
 CONTRACT_QTY       = 0.38       # Target trade size (~₹150 margin)
-MAX_TRADES_PER_DAY = 2          # Strict daily limit (Max 2 trades/day)
-RISK_REWARD_RATIO  = 1.5        # Profitable 1:1.5 RR (+₹60 profit target per trade!)
+MAX_TRADES_PER_DAY = 4          # Active intraday limit (Allows catching new trends today)
+RISK_REWARD_RATIO  = 1.8        # Fee-adjusted 1:1.8 RR (+₹70 profit target, covers exchange charges)
 MIN_SL_POINTS      = 12.0       # 12 pts min SL (~0.12% - allows tight risk setups)
 MAX_SL_POINTS      = 110.0      # 110 pts max SL (~1.10% safe room against wicks)
 SL_BUFFER_POINTS   = 10.0       # 10pt buffer against Solana stop-hunt wicks
@@ -27,13 +27,11 @@ COOLDOWN_LOSS_MINS = 60         # 1-hour patience cooldown after any loss
 
 # Timeframes & Indicators
 # NOTE: User Strategy Presets:
-# Current Active: Regular Frequency Mode (EMA_HTF_MIN_SLOPE = 0.6, MIN_WICK_RATIO = 0.30)
-# Sniper Old Mode: High-Capital Strict Mode (EMA_HTF_MIN_SLOPE = 1.2, MIN_WICK_RATIO = 0.45)
-# (When user says "Capital increase ho gaya old strategy setup karo", switch back to 1.2 & 0.45)
+# Current Active: Fast Trend Mode (15m EMA 50 for quick intraday trend detection)
 HTF_RESOLUTION     = "15m"
-EMA_HTF            = 200
-EMA_HTF_MIN_SLOPE  = 0.6        # Balanced momentum slope (Rejects flat markets while catching smooth trends)
-EMA_HTF_DANGER_PCT = 0.20       # Minimum distance from EMA 200 to confirm trend breakout
+EMA_HTF            = 50         # Fast 15m EMA 50 (Catches same-day 100-200 point trends instantly)
+EMA_HTF_MIN_SLOPE  = 0.5        # Balanced momentum slope
+EMA_HTF_DANGER_PCT = 0.15       # Minimum distance from EMA 50 to confirm trend breakout
 
 LTF_RESOLUTION     = "5m"
 EMA_FAST           = 20
