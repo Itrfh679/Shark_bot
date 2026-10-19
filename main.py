@@ -23,7 +23,7 @@ from config import (
     HTF_RESOLUTION, EMA_HTF, EMA_HTF_MIN_SLOPE, EMA_HTF_DANGER_PCT,
     LTF_RESOLUTION, EMA_FAST, EMA_SLOW, RSI_PERIOD,
     RSI_BUY_MIN, RSI_BUY_MAX, RSI_SELL_MIN, RSI_SELL_MAX, MIN_WICK_RATIO,
-    VOLUME_MA_PERIOD, VOLUME_THRESHOLD_PCT, ENABLE_BREAK_EVEN
+    VOLUME_MA_PERIOD, VOLUME_THRESHOLD_PCT, ENABLE_VOLUME_FILTER, ENABLE_BREAK_EVEN
 )
 from shark_api import SharkClient
 
@@ -249,7 +249,7 @@ class CloudTradingBot:
         volumes_5m = [c.get("volume", 0.0) for c in c5m]
         avg_vol_20 = sum(volumes_5m[-VOLUME_MA_PERIOD-1:-1]) / float(VOLUME_MA_PERIOD) if len(volumes_5m) > VOLUME_MA_PERIOD else (sum(volumes_5m) / max(len(volumes_5m), 1))
         curr_vol   = curr_5m.get("volume", 0.0)
-        vol_confirmed = (curr_vol >= avg_vol_20 * VOLUME_THRESHOLD_PCT) if avg_vol_20 > 0 else True
+        vol_confirmed = (curr_vol >= avg_vol_20 * VOLUME_THRESHOLD_PCT) if (ENABLE_VOLUME_FILTER and avg_vol_20 > 0) else True
 
         htf_dist = abs(sol_price - e200_curr) / sol_price * 100.0
         htf_bullish = (sol_price > e200_curr) and (slope_15m >= EMA_HTF_MIN_SLOPE) and (htf_dist >= EMA_HTF_DANGER_PCT)
@@ -424,8 +424,7 @@ class CloudTradingBot:
             f"• *Dynamic Size*: `{trade_qty} SOL` (~₹{margin_required:,.0f} Margin at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
             f"• *Stop Loss*: ₹{sl:,.0f} (-₹{expected_risk:.1f} Risk [~₹{RISK_PER_TRADE_INR:.0f}]) 🛑\n"
-            f"• *Target (1:{RISK_REWARD_RATIO})*: ₹{target:,.0f} (+₹{expected_reward:.1f} Profit) 🎯\n"
-            f"• *Volume Confirmation*: `{curr_vol:,.0f}` (Avg: `{avg_vol_20:,.0f}`) ✅\n\n"
+            f"• *Target (1:{RISK_REWARD_RATIO})*: ₹{target:,.0f} (+₹{expected_reward:.1f} Profit) 🎯\n\n"
             f"📈 Trades Today: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
             f"🛡️ Auto Break-Even & Dynamic Risk Active 🔒"
         )
