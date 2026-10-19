@@ -128,8 +128,8 @@ class CloudTradingBot:
                 entry = float(matched_pos.get("entryPrice", 0.0))
                 qty = float(matched_pos.get("quantity") or matched_pos.get("positionAmount") or matched_pos.get("size") or CONTRACT_QTY)
                 side = "BUY" if str(matched_pos.get("positionType", "")).upper() == "LONG" else "SELL"
-                sl_qty = int(matched_pos.get("stopLossOrdersQty", 0) or 0)
-                tp_qty = int(matched_pos.get("takeProfitOrdersQty", 0) or 0)
+                sl_qty = float(matched_pos.get("stopLossOrdersQty", 0) or 0.0)
+                tp_qty = float(matched_pos.get("takeProfitOrdersQty", 0) or 0.0)
 
                 # Strategy default SL (10079 for entry 10128) & TP (10202 for 1:1.5 RR)
                 if side == "BUY":
@@ -147,15 +147,17 @@ class CloudTradingBot:
                         "target": tp_price,
                         "qty": qty,
                         "risk_pts": abs(entry - sl_price),
-                        "breakeven_set": False
+                        "breakeven_set": False,
+                        "tpsl_attached": bool(sl_qty > 0 and tp_qty > 0)
                     }
                     log.info(f"Synchronized active {side} position from exchange: Entry={entry}, SL={sl_price}, TP={tp_price}, Qty={qty}")
 
                 # If exchange has 0 stop loss or 0 take profit orders, attach them natively!
-                if sl_qty == 0 or tp_qty == 0:
+                if (sl_qty <= 0.0 or tp_qty <= 0.0) and not self.active_trade.get("tpsl_attached"):
                     log.warning(f"Position has missing exchange TP/SL (SL_qty={sl_qty}, TP_qty={tp_qty}). Auto-attaching now...")
                     attach_res = self.client.attach_tpsl_to_open_position(SYMBOL, tp_price=tp_price, sl_price=sl_price)
                     log.info(f"Auto-attach TP/SL result: {attach_res}")
+                    self.active_trade["tpsl_attached"] = True
                     send_telegram(
                         f"🛡️ *ACTIVE POSITION: TP & SL AUTO-ATTACHED!* 🦈\n\n"
                         f"• *Pair*: `{SYMBOL}`\n"
@@ -165,6 +167,8 @@ class CloudTradingBot:
                         f"• *Take Profit (TP)*: ₹{tp_price:,.0f} 🎯\n\n"
                         f"Exchange order book me TP aur SL orders successfully submit ho gaye hain!"
                     )
+                elif sl_qty > 0.0 and tp_qty > 0.0:
+                    self.active_trade["tpsl_attached"] = True
             else:
                 if self.active_trade:
                     log.info("Exchange reports position closed. Clearing active trade.")
