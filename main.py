@@ -426,7 +426,7 @@ class CloudTradingBot:
             f"• *Stop Loss*: ₹{sl:,.0f} (-₹{expected_risk:.1f} Risk [~₹{RISK_PER_TRADE_INR:.0f}]) 🛑\n"
             f"• *Target (1:{RISK_REWARD_RATIO})*: ₹{target:,.0f} (+₹{expected_reward:.1f} Profit) 🎯\n\n"
             f"📈 Trades Today: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
-            f"🛡️ Dynamic Risk & ₹80 Profit Target Active 🔒"
+            f"🛡️ Dynamic Risk & ₹60 Profit Target Active 🔒"
         )
 
 import http.server
