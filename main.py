@@ -171,7 +171,62 @@ class CloudTradingBot:
                     self.active_trade["tpsl_attached"] = True
             else:
                 if self.active_trade:
-                    log.info("Exchange reports position closed. Clearing active trade.")
+                    log.info("Exchange reports position closed. Processing trade outcome...")
+                    trade = self.active_trade
+                    side = trade["side"]
+                    entry = trade["entry"]
+                    sl = trade["sl"]
+                    tgt = trade["target"]
+                    qty = trade.get("qty", CONTRACT_QTY)
+
+                    # Fetch latest candle to determine exit price
+                    c5m = self.client.get_candles(LTF_RESOLUTION, 5)
+                    last_c = c5m[-1] if c5m else {"close": entry, "high": entry, "low": entry}
+                    exit_price = last_c.get("close", entry)
+
+                    if side == "BUY":
+                        if last_c.get("high", 0.0) >= tgt or exit_price >= (tgt - 5.0):
+                            exit_price = tgt
+                            is_win = True
+                            outcome_str, outcome_emoji = "PROFIT TARGET 🎯", "🎉"
+                        else:
+                            exit_price = sl
+                            is_win = False
+                            outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
+                    else:
+                        if last_c.get("low", 999999.0) <= tgt or exit_price <= (tgt + 5.0):
+                            exit_price = tgt
+                            is_win = True
+                            outcome_str, outcome_emoji = "PROFIT TARGET 🎯", "🎉"
+                        else:
+                            exit_price = sl
+                            is_win = False
+                            outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
+
+                    pnl_pts = (exit_price - entry) if side == "BUY" else (entry - exit_price)
+                    pnl_inr = pnl_pts * qty
+                    self.daily_stats["pnl_inr_today"] += pnl_inr
+                    self.daily_stats["total_month_pnl_inr"] += pnl_inr
+
+                    if is_win:
+                        self.daily_stats["wins_today"] += 1
+                    else:
+                        self.daily_stats["losses_today"] += 1
+                        self.last_loss_time = time.time()
+
+                    cooldown_text = "\n• *Cooldown*: 60 min patient wait active ⏳" if not is_win else ""
+                    send_telegram(
+                        f"🏁 *TRADE CLOSED ({outcome_str})* {outcome_emoji}\n\n"
+                        f"• *Pair*: `{SYMBOL}`\n"
+                        f"• *Side*: `{side}` ({qty} SOL)\n"
+                        f"• *Entry Price*: ₹{entry:,.0f} INR\n"
+                        f"• *Exit Price*: ₹{exit_price:,.0f} INR\n"
+                        f"• *Net P&L*: *₹{pnl_inr:+.1f} INR* {outcome_emoji}\n\n"
+                        f"📊 *Scorecard Today:*\n"
+                        f"• Trades: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
+                        f"• Today P&L: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*"
+                        f"{cooldown_text}"
+                    )
                     self.active_trade = None
         except Exception as e:
             log.error(f"Error syncing active trade from exchange: {e}")
@@ -408,10 +463,10 @@ class CloudTradingBot:
                     outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
                     self.last_loss_time = time.time()
 
-                # Ensure exchange market order executes in case limit/stop orders are pending
+                # Ensure exchange market order executes in case limit/stop orders are pending (Reduce-Only to prevent accidental reverse positions)
                 try:
                     exit_side = "SELL" if side == "BUY" else "BUY"
-                    self.client.place_market_order(exit_side, qty)
+                    self.client.place_market_order(exit_side, qty, reduce_only=True)
                 except Exception as ex_err:
                     log.error(f"Error executing market close on exchange: {ex_err}")
 

@@ -203,7 +203,7 @@ class SharkClient:
     # ─────────────────────────────────────────────────────────
     #  ORDER EXECUTION
     # ─────────────────────────────────────────────────────────
-    def place_market_order(self, side: str, qty: float, symbol: str = None, tp_price: float = None, sl_price: float = None) -> dict:
+    def place_market_order(self, side: str, qty: float, symbol: str = None, tp_price: float = None, sl_price: float = None, reduce_only: bool = False) -> dict:
         """
         Places market order on Shark Exchange, optionally with TP and SL.
         """
@@ -220,7 +220,7 @@ class SharkClient:
             "side": side.upper(),
             "symbol": target_sym,
             "type": "MARKET",
-            "reduceOnly": False,
+            "reduceOnly": bool(reduce_only),
             "marginAsset": "INR",
             "deviceType": "WEB",
             "userCategory": "EXTERNAL",
