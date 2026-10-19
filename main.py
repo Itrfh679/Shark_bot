@@ -12,7 +12,9 @@ import json
 import socket
 import logging
 import threading
+import urllib.parse
 import requests
+
 
 from config import (
     SHARK_API_KEY, SHARK_API_SECRET, SHARK_BASE_URL, SYMBOL,
@@ -106,11 +108,76 @@ class CloudTradingBot:
             self.daily_stats["losses_today"] = 0
             self.daily_stats["pnl_inr_today"] = 0.0
 
+    def sync_active_trade_from_exchange(self):
+        """
+        Synchronizes bot's in-memory trade state with live positions on Shark Exchange.
+        If an open position exists without exchange TP/SL orders, automatically attaches them.
+        """
+        try:
+            positions = self.client.get_open_positions()
+            pos_list = positions if isinstance(positions, list) else (positions.get("data") or positions.get("result") or [])
+            matched_pos = None
+            if isinstance(pos_list, list):
+                for p in pos_list:
+                    p_sym = p.get("contractPair", "") or p.get("symbol", "")
+                    if SYMBOL.replace("-", "").upper() in p_sym.replace("-", "").upper():
+                        matched_pos = p
+                        break
+
+            if matched_pos:
+                entry = float(matched_pos.get("entryPrice", 0.0))
+                qty = float(matched_pos.get("quantity") or matched_pos.get("positionAmount") or matched_pos.get("size") or CONTRACT_QTY)
+                side = "BUY" if str(matched_pos.get("positionType", "")).upper() == "LONG" else "SELL"
+                sl_qty = int(matched_pos.get("stopLossOrdersQty", 0) or 0)
+                tp_qty = int(matched_pos.get("takeProfitOrdersQty", 0) or 0)
+
+                # Strategy default SL (10079 for entry 10128) & TP (10202 for 1:1.5 RR)
+                if side == "BUY":
+                    sl_price = round(entry - 49.0, 1)
+                    tp_price = round(entry + (49.0 * RISK_REWARD_RATIO), 1)
+                else:
+                    sl_price = round(entry + 49.0, 1)
+                    tp_price = round(entry - (49.0 * RISK_REWARD_RATIO), 1)
+
+                if not self.active_trade:
+                    self.active_trade = {
+                        "side": side,
+                        "entry": entry,
+                        "sl": sl_price,
+                        "target": tp_price,
+                        "qty": qty,
+                        "risk_pts": abs(entry - sl_price),
+                        "breakeven_set": False
+                    }
+                    log.info(f"Synchronized active {side} position from exchange: Entry={entry}, SL={sl_price}, TP={tp_price}, Qty={qty}")
+
+                # If exchange has 0 stop loss or 0 take profit orders, attach them natively!
+                if sl_qty == 0 or tp_qty == 0:
+                    log.warning(f"Position has missing exchange TP/SL (SL_qty={sl_qty}, TP_qty={tp_qty}). Auto-attaching now...")
+                    attach_res = self.client.attach_tpsl_to_open_position(SYMBOL, tp_price=tp_price, sl_price=sl_price)
+                    log.info(f"Auto-attach TP/SL result: {attach_res}")
+                    send_telegram(
+                        f"🛡️ *ACTIVE POSITION: TP & SL AUTO-ATTACHED!* 🦈\n\n"
+                        f"• *Pair*: `{SYMBOL}`\n"
+                        f"• *Side*: `{side}` ({qty} SOL)\n"
+                        f"• *Entry Price*: ₹{entry:,.0f} INR\n"
+                        f"• *Stop Loss (SL)*: ₹{sl_price:,.0f} 🛑\n"
+                        f"• *Take Profit (TP)*: ₹{tp_price:,.0f} 🎯\n\n"
+                        f"Exchange order book me TP aur SL orders successfully submit ho gaye hain!"
+                    )
+            else:
+                if self.active_trade:
+                    log.info("Exchange reports position closed. Clearing active trade.")
+                    self.active_trade = None
+        except Exception as e:
+            log.error(f"Error syncing active trade from exchange: {e}")
+
     # ─────────────────────────────────────────────────────────
     #  TELEGRAM BOT COMMAND LISTENER (THREAD 1)
     # ─────────────────────────────────────────────────────────
     def run_telegram_listener(self):
         log.info("Telegram command listener started.")
+
         offset = 0
         while True:
             try:
@@ -213,6 +280,9 @@ class CloudTradingBot:
             f"👉 Send `/status` or `/balance` anytime to inspect!"
         )
 
+        # Sync open positions immediately upon startup
+        self.sync_active_trade_from_exchange()
+
         while True:
             try:
                 self._reset_daily_stats_if_needed()
@@ -223,6 +293,9 @@ class CloudTradingBot:
             time.sleep(30)
 
     def _scan_market_cycle(self):
+        # Sync open positions with exchange
+        self.sync_active_trade_from_exchange()
+
         # Fetch candles
         c15m = self.client.get_candles(HTF_RESOLUTION, 220)
         c5m  = self.client.get_candles(LTF_RESOLUTION, 70)
@@ -330,6 +403,13 @@ class CloudTradingBot:
                     self.daily_stats["losses_today"] += 1
                     outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
                     self.last_loss_time = time.time()
+
+                # Ensure exchange market order executes in case limit/stop orders are pending
+                try:
+                    exit_side = "SELL" if side == "BUY" else "BUY"
+                    self.client.place_market_order(exit_side, qty)
+                except Exception as ex_err:
+                    log.error(f"Error executing market close on exchange: {ex_err}")
 
                 send_telegram(
                     f"🏁 *TRADE CLOSED ({outcome_str})* {outcome_emoji}\n\n"
@@ -531,7 +611,35 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": "No open XRP position found in API", "raw": positions}).encode())
             return
 
+        if self.path.startswith("/set-sol-tpsl") or self.path.startswith("/attach-tpsl"):
+            client = SharkClient()
+            parsed = urllib.parse.urlparse(self.path)
+            q_params = urllib.parse.parse_qs(parsed.query)
+            tp_arg = float(q_params.get("tp", [0])[0]) if "tp" in q_params else 10202.0
+            sl_arg = float(q_params.get("sl", [0])[0]) if "sl" in q_params else 10079.0
+            sym_arg = q_params.get("symbol", [SYMBOL])[0]
+
+            res = client.attach_tpsl_to_open_position(sym_arg, tp_price=tp_arg, sl_price=sl_arg)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+            if res.get("success"):
+                send_telegram(
+                    "🎯 *SOL POSITION: TP & SL SET HO GAYA!* 🛡️\n\n"
+                    f"• *Asset*: `{sym_arg}` ({res.get('qty', 0.4)} SOL)\n"
+                    f"• *Entry Price*: ₹10,128 INR\n"
+                    f"• *Take Profit (TP)*: `₹{tp_arg}` 🎯\n"
+                    f"• *Stop Loss (SL)*: `₹{sl_arg}` 🛑\n\n"
+                    "Shark Exchange App me TP aur SL active ho chuka hai!"
+                )
+            else:
+                send_telegram(f"❌ *TP/SL Set Error:*\n`{res}`")
+            return
+
         if self.path == "/close-xrp":
+
             client = SharkClient()
             res = client.close_all_positions()
             self.send_response(200)
