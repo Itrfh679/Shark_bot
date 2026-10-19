@@ -17,7 +17,7 @@ MIN_CONTRACT_QTY   = 0.20       # Minimum quantity boundary
 MAX_CONTRACT_QTY   = 0.40       # Max quantity (~₹150 margin at 25x with ₹10k SOL)
 CONTRACT_QTY       = 0.38       # Target trade size (~₹150 margin)
 MAX_TRADES_PER_DAY = 2          # Strict daily limit (Max 2 trades/day)
-RISK_REWARD_RATIO  = 2.0        # Practical 1:2 RR (2.0% move = +₹76-₹80 profit!)
+RISK_REWARD_RATIO  = 1.5        # Practical 1:1.5 RR (1.5x move = +₹60 profit target!)
 MIN_SL_POINTS      = 12.0       # 12 pts min SL (~0.12% - allows tight risk setups)
 MAX_SL_POINTS      = 110.0      # 110 pts max SL (~1.10% safe room against wicks)
 SL_BUFFER_POINTS   = 10.0       # 10pt buffer against Solana stop-hunt wicks
@@ -41,10 +41,10 @@ RSI_BUY_MIN        = 50.0
 RSI_BUY_MAX        = 66.0
 RSI_SELL_MIN       = 34.0
 RSI_SELL_MAX       = 50.0
-MIN_WICK_RATIO     = 0.30       # Realistic 30%+ Rejection Wick (Captures solid institutional bounces)
+MIN_WICK_RATIO     = 0.35       # Clean 35%+ Rejection Wick (Filters weak fakeouts, captures solid institutional bounces)
 
 # Pushkar Raj Thakur Course Enhancements
 VOLUME_MA_PERIOD     = 20       # 20-period Volume Moving Average
 VOLUME_THRESHOLD_PCT = 0.00     # 0.0x (Disabled so pullbacks are not blocked)
 ENABLE_VOLUME_FILTER = False    # Turned OFF for smooth active execution
-ENABLE_BREAK_EVEN    = True     # Auto shift SL to entry at 1:1 Risk-Reward
+ENABLE_BREAK_EVEN    = False    # Turned OFF so normal re-tests do not prematurely kill winning trades!
