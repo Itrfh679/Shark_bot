@@ -360,10 +360,13 @@ class CloudTradingBot:
         bear_rej = (upper_wick / c_range) >= MIN_WICK_RATIO
 
         e20, e50 = ema20_5m[-1], ema50_5m[-1]
+        pullback_bull = (min(curr_5m["low"], prev_5m["low"]) <= e20) and (curr_5m["close"] >= e20)
+        pullback_bear = (max(curr_5m["high"], prev_5m["high"]) >= e20) and (curr_5m["close"] <= e20)
+
         signal = None
-        if htf_bullish and (e20 > e50) and (prev_5m["low"] <= e20) and (curr_5m["close"] >= e20) and bull_rej and (RSI_BUY_MIN <= rsi <= RSI_BUY_MAX) and vol_confirmed:
+        if htf_bullish and (e20 > e50) and pullback_bull and bull_rej and (RSI_BUY_MIN <= rsi <= RSI_BUY_MAX) and vol_confirmed:
             signal = "BUY"
-        elif htf_bearish and (e20 < e50) and (prev_5m["high"] >= e20) and (curr_5m["close"] <= e20) and bear_rej and (RSI_SELL_MIN <= rsi <= RSI_SELL_MAX) and vol_confirmed:
+        elif htf_bearish and (e20 < e50) and pullback_bear and bear_rej and (RSI_SELL_MIN <= rsi <= RSI_SELL_MAX) and vol_confirmed:
             signal = "SELL"
 
         if not signal:

@@ -18,9 +18,9 @@ MAX_CONTRACT_QTY   = 0.40       # Max quantity (~₹150 margin at 25x with ₹10
 CONTRACT_QTY       = 0.38       # Target trade size (~₹150 margin)
 MAX_TRADES_PER_DAY = 2          # Strict daily limit (Max 2 trades/day)
 RISK_REWARD_RATIO  = 2.0        # Practical 1:2 RR (2.0% move = +₹76-₹80 profit!)
-MIN_SL_POINTS      = 50.0       # 50 pts min SL (~0.50%)
+MIN_SL_POINTS      = 25.0       # 25 pts min SL (~0.25% - allows tight risk setups)
 MAX_SL_POINTS      = 110.0      # 110 pts max SL (~1.10% safe room against wicks)
-SL_BUFFER_POINTS   = 12.0       # 12pt buffer against Solana stop-hunt wicks
+SL_BUFFER_POINTS   = 10.0       # 10pt buffer against Solana stop-hunt wicks
 COOLDOWN_LOSS_MINS = 60         # 1-hour patience cooldown after any loss
 
 # Timeframes & Indicators
@@ -45,5 +45,5 @@ MIN_WICK_RATIO     = 0.30       # Realistic 30%+ Rejection Wick (Captures solid 
 
 # Pushkar Raj Thakur Course Enhancements
 VOLUME_MA_PERIOD     = 20       # 20-period Volume Moving Average
-VOLUME_THRESHOLD_PCT = 1.00     # 1.0x (100%) - Trigger candle volume >= 20-period SMA
+VOLUME_THRESHOLD_PCT = 0.75     # 0.75x (75%) - Trigger candle volume >= 75% of 20-period SMA
 ENABLE_BREAK_EVEN    = True     # Auto shift SL to entry at 1:1 Risk-Reward
