@@ -12,14 +12,14 @@ RENDER_DEPLOY_HOOK = os.getenv("RENDER_DEPLOY_HOOK", "https://api.render.com/dep
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8959389105:AAGza59y2PmqfDrybiZnYJjcAvyIhKLU3w0")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "5706939133")
 
-# Strategy & Dynamic Risk Management (Realistic 1:2 RR | ₹150 Margin)
+# Strategy & Dynamic Risk Management (Sniper Sweet Spot | ~₹240 Margin)
 LEVERAGE           = 25
-RISK_PER_TRADE_INR = 40.0       # Realistic ₹38-₹40 loss per trade (Safely inside ₹50 budget)
-MIN_CONTRACT_QTY   = 0.20       # Minimum quantity boundary
-MAX_CONTRACT_QTY   = 0.40       # Max quantity (~₹150 margin at 25x with ₹10k SOL)
-CONTRACT_QTY       = 0.38       # Target trade size (~₹150 margin)
+RISK_PER_TRADE_INR = 65.0       # Max ₹65 loss per trade (Capped for ₹1,000 capital safety)
+MIN_CONTRACT_QTY   = 0.30       # Minimum quantity boundary
+MAX_CONTRACT_QTY   = 0.65       # Max quantity (~₹260 margin at 25x with ₹10k SOL)
+CONTRACT_QTY       = 0.60       # Target trade size (~₹240 margin)
 MAX_TRADES_PER_DAY = 2          # Strict daily limit (Max 2 trades/day)
-RISK_REWARD_RATIO  = 2.0        # Practical 1:2 RR (2.0x move = +₹76-₹80 profit target!)
+RISK_REWARD_RATIO  = 2.2        # Solid 1:2.2 RR (+₹145 to +₹150 profit target per trade!)
 MIN_SL_POINTS      = 12.0       # 12 pts min SL (~0.12% - allows tight risk setups)
 MAX_SL_POINTS      = 110.0      # 110 pts max SL (~1.10% safe room against wicks)
 SL_BUFFER_POINTS   = 10.0       # 10pt buffer against Solana stop-hunt wicks
