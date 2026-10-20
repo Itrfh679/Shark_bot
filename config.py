@@ -22,11 +22,12 @@ MAX_LOSSES_PER_DAY         = 2          # Daily Circuit Breaker: 2 Losses Max (S
 MAX_TRADES_PER_DAY         = 5          # Winning Mode: up to 5 trades if winning
 COOLDOWN_LOSS_MINS         = 30         # 30-min patience pause after any loss
 
-# 15-Minute Elastic Mean Reversion Rules
+# 15-Minute Elastic Mean Reversion + Reversal Candle Confirmation
 RESOLUTION                 = "15m"      # Clean 15-Minute timeframe (zero 5m noise)
 EMA_PERIOD                 = 20         # 15m EMA 20 (Average equilibrium price)
 RSI_PERIOD                 = 14         # 15m RSI 14
 RSI_OVERSOLD               = 25.0       # Extreme panic dump (Buy trigger)
 RSI_OVERBOUGHT             = 75.0       # Extreme greed peak (Sell trigger)
 EMA_STRETCH_PCT            = 1.2        # Minimum 1.2% stretch from EMA 20
+REQUIRE_REVERSAL_CONFIRM   = True       # Reversal Confirmation: Red candle for Sell, Green candle for Buy
 

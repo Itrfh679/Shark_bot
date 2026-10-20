@@ -23,7 +23,7 @@ from config import (
     MAX_LOSS_PER_TRADE_INR, MAX_PROFIT_PER_TRADE_INR,
     MAX_LOSSES_PER_DAY, MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
     RESOLUTION, EMA_PERIOD, RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
-    EMA_STRETCH_PCT
+    EMA_STRETCH_PCT, REQUIRE_REVERSAL_CONFIRM
 )
 from shark_api import SharkClient
 
@@ -354,10 +354,11 @@ class CloudTradingBot:
             f"🦈 *SHARK EXCHANGE 24x7 CLOUD BOT ONLINE!* ☁️\n\n"
             f"• *Cloud Server IP*: `{self.public_ip}`\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Strategy*: 15m Elastic Mean Reversion (Rubber-Band)\n"
+            f"• *Strategy*: 15m Elastic Mean Reversion + Reversal Confirmation 🛡️\n"
             f"• *Trade Size*: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
             f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
             f"• *Take Profit*: Exact +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit (1:2.0 RR) 🎯\n"
+            f"• *Confirmation*: 🔴 Red candle for SELL | 🟢 Green candle for BUY ✅\n"
             f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
             f"• *Phone Status*: You can close your phone/Termux now! 📱💤\n\n"
             f"👉 Send `/status` or `/balance` anytime to inspect!"
@@ -389,9 +390,15 @@ class CloudTradingBot:
         rsi        = calc_rsi(closes_15m, RSI_PERIOD)
 
         curr_candle = c15m[-1]
+        prev_candle = c15m[-2] if len(c15m) >= 2 else curr_candle
         sol_price   = curr_candle["close"]
         ema_val     = ema20_15m[-1]
         dist_pct    = ((sol_price - ema_val) / ema_val) * 100.0
+
+        prev_closes = closes_15m[:-1]
+        prev_rsi    = calc_rsi(prev_closes, RSI_PERIOD)
+        prev_ema    = ema20_15m[-2] if len(ema20_15m) >= 2 else ema_val
+        prev_dist   = ((prev_candle["close"] - prev_ema) / prev_ema) * 100.0
 
         # Heartbeat every 1 hour
         now = time.time()
@@ -480,12 +487,27 @@ class CloudTradingBot:
         if curr_candle["time"] == self.last_candle_time:
             return
 
-        # 15m Elastic Mean Reversion Entry Signals
+        # 15m Elastic Mean Reversion Entry Signals with Reversal Candle Confirmation
         signal = None
-        if rsi <= RSI_OVERSOLD and dist_pct <= -EMA_STRETCH_PCT:
+        reversal_detail = ""
+
+        # BUY: Was in deep oversold (current or prev candle RSI <= 25 & dist <= -1.2%),
+        # AND current candle is GREEN (close > open), confirming buyers stepped in!
+        is_oversold = (rsi <= RSI_OVERSOLD or prev_rsi <= RSI_OVERSOLD) and (dist_pct <= -EMA_STRETCH_PCT or prev_dist <= -EMA_STRETCH_PCT)
+        bullish_reversal = (curr_candle["close"] > curr_candle["open"]) if REQUIRE_REVERSAL_CONFIRM else True
+
+        if is_oversold and bullish_reversal:
             signal = "BUY"
-        elif rsi >= RSI_OVERBOUGHT and dist_pct >= EMA_STRETCH_PCT:
+            reversal_detail = "🟢 Green Candle Bounce (Buyers confirmed)"
+
+        # SELL: Was in extreme overbought (current or prev candle RSI >= 75 & dist >= 1.2%),
+        # AND current candle is RED (close < open), confirming sellers took over!
+        is_overbought = (rsi >= RSI_OVERBOUGHT or prev_rsi >= RSI_OVERBOUGHT) and (dist_pct >= EMA_STRETCH_PCT or prev_dist >= EMA_STRETCH_PCT)
+        bearish_reversal = (curr_candle["close"] < curr_candle["open"]) if REQUIRE_REVERSAL_CONFIRM else True
+
+        if is_overbought and bearish_reversal:
             signal = "SELL"
+            reversal_detail = "🔴 Red Candle Rejection (Sellers confirmed)"
 
         if not signal:
             return
@@ -527,9 +549,10 @@ class CloudTradingBot:
         }
 
         send_telegram(
-            f"🚀 *A+ {signal} ORDER EXECUTED ON SHARK!* 🦈\n\n"
+            f"🚀 *A+ {signal} (REVERSAL CONFIRMED) ORDER EXECUTED!* 🦈\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Strategy*: 15m Elastic Mean Reversion\n"
+            f"• *Strategy*: 15m Elastic Reversion + Confirmation\n"
+            f"• *Confirmation*: {reversal_detail}\n"
             f"• *Side*: `{signal}` ({CONTRACT_QTY} SOL)\n"
             f"• *Margin Used*: ~₹{margin_required:,.0f} INR (at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
