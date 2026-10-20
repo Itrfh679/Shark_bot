@@ -553,7 +553,15 @@ class CloudTradingBot:
 
         attach_res = res.get("attach_res", {})
         tpsl_attached = bool(attach_res.get("success"))
-        tpsl_status_msg = "✅ Active on Shark Exchange (Open Orders & Positions)" if tpsl_attached else "⏳ Attaching on exchange..."
+
+        # If not confirmed on first attempt, retry immediately to guarantee SL and TP are set together with entry!
+        if not tpsl_attached:
+            log.warning("TP/SL not confirmed on first attempt, retrying immediately...")
+            time.sleep(1.0)
+            retry_res = self.client.attach_tpsl_to_open_position(SYMBOL, tp_price=target, sl_price=sl)
+            tpsl_attached = bool(retry_res.get("success"))
+
+        tpsl_status_msg = "✅ SL & TP Active on Shark Exchange" if tpsl_attached else "⏳ Attaching on exchange..."
 
         self.last_candle_time = curr_candle["time"]
         self.daily_stats["trades_today"] += 1

@@ -455,11 +455,11 @@ class SharkClient:
 
     def place_bracket_order(self, side: str, qty: float, stop_loss: float, take_profit: float, symbol: str = None) -> dict:
         """
-        Places entry order and automatically attaches visible TP & SL on Shark Exchange.
+        Places entry order WITH Stop Loss and Take Profit attached simultaneously.
         """
         target_sym = symbol or self.symbol
-        # 1. Place Entry Market Order
-        res = self.place_market_order(side, qty, symbol=target_sym)
+        # 1. Place Entry Market Order WITH TP & SL prices included directly
+        res = self.place_market_order(side, qty, symbol=target_sym, tp_price=take_profit, sl_price=stop_loss)
         if not res.get("success"):
             return {
                 "success": False,
@@ -467,8 +467,8 @@ class SharkClient:
                 "raw": res
             }
 
-        # 2. Allow exchange 1.5 seconds to register position, then attach native TP & SL
-        time.sleep(1.5)
+        # 2. Immediately verify and attach via Split TP/SL on the open position to ensure 100% visibility on app
+        time.sleep(1.0)
         attach_res = self.attach_tpsl_to_open_position(target_sym, tp_price=take_profit, sl_price=stop_loss)
 
         return {
