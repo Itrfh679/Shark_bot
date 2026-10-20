@@ -432,13 +432,16 @@ class SharkClient:
             split_res = self.set_split_tp_sl(pos_id, tp_price, sl_price, qty)
             log.info(f"Split TP/SL result: {split_res}")
 
-        # 2. Native Reduce-Only Limit & Stop-Market Orders (guarantees visibility in Open Orders tab)
-        r_tp = self.place_limit_order(exit_side, qty, tp_price, target_sym, reduce_only=True, position_id=pos_id)
-        r_sl = self.place_stop_market_order(exit_side, qty, sl_price, target_sym, reduce_only=True, position_id=pos_id)
-        fallback_res = {"tp_order": r_tp, "sl_order": r_sl}
-        log.info(f"Native exchange orders placed: TP={r_tp.get('success')}, SL={r_sl.get('success')}")
+        # 2. Only use fallback orders if split_tp_sl failed, preventing duplicate orders
+        fallback_res = {}
+        if not split_res.get("success"):
+            log.warning("Split TP/SL failed, using fallback reduce-only orders...")
+            r_tp = self.place_limit_order(exit_side, qty, tp_price, target_sym, reduce_only=True, position_id=pos_id)
+            r_sl = self.place_stop_market_order(exit_side, qty, sl_price, target_sym, reduce_only=True, position_id=pos_id)
+            fallback_res = {"tp_order": r_tp, "sl_order": r_sl}
+            log.info(f"Fallback orders placed: TP={r_tp.get('success')}, SL={r_sl.get('success')}")
 
-        is_success = bool(split_res.get("success") or r_tp.get("success") or r_sl.get("success"))
+        is_success = bool(split_res.get("success") or (fallback_res.get("tp_order", {}).get("success") and fallback_res.get("sl_order", {}).get("success")))
         return {
             "success": is_success,
             "pos_id": pos_id,
