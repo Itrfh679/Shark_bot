@@ -151,13 +151,15 @@ class CloudTradingBot:
                 sl_qty = float(matched_pos.get("stopLossOrdersQty", 0) or 0.0)
                 tp_qty = float(matched_pos.get("takeProfitOrdersQty", 0) or 0.0)
 
-                # Strategy default SL (10079 for entry 10128) & TP (10202 for 1:1.5 RR)
+                # Strategy exact SL (-₹40) and TP (+₹80) points
+                sl_pts = round(MAX_LOSS_PER_TRADE_INR / qty, 2)
+                tp_pts = round(MAX_PROFIT_PER_TRADE_INR / qty, 2)
                 if side == "BUY":
-                    sl_price = round(entry - 49.0, 1)
-                    tp_price = round(entry + (49.0 * RISK_REWARD_RATIO), 1)
+                    sl_price = round(entry - sl_pts, 1)
+                    tp_price = round(entry + tp_pts, 1)
                 else:
-                    sl_price = round(entry + 49.0, 1)
-                    tp_price = round(entry - (49.0 * RISK_REWARD_RATIO), 1)
+                    sl_price = round(entry + sl_pts, 1)
+                    tp_price = round(entry - tp_pts, 1)
 
                 if not self.active_trade:
                     self.active_trade = {
@@ -183,9 +185,9 @@ class CloudTradingBot:
                         f"• *Pair*: `{SYMBOL}`\n"
                         f"• *Side*: `{side}` ({qty} SOL)\n"
                         f"• *Entry Price*: ₹{entry:,.0f} INR\n"
-                        f"• *Stop Loss (SL)*: ₹{sl_price:,.0f} 🛑\n"
-                        f"• *Take Profit (TP)*: ₹{tp_price:,.0f} 🎯\n\n"
-                        f"Exchange order book me TP aur SL orders successfully submit ho gaye hain!"
+                        f"• *Stop Loss (SL)*: ₹{sl_price:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Risk) 🛑\n"
+                        f"• *Take Profit (TP)*: ₹{tp_price:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target) 🎯\n\n"
+                        f"✅ Shark Exchange par Open Orders & Positions me TP/SL submit ho gaya hai!"
                     )
                 elif sl_qty > 0.0 and tp_qty > 0.0:
                     self.active_trade["tpsl_attached"] = True
@@ -199,29 +201,29 @@ class CloudTradingBot:
                     tgt = trade["target"]
                     qty = trade.get("qty", CONTRACT_QTY)
 
-                    # Fetch latest candle to determine exit price
-                    c5m = self.client.get_candles(LTF_RESOLUTION, 5)
-                    last_c = c5m[-1] if c5m else {"close": entry, "high": entry, "low": entry}
+                    # Fetch latest 15m candle to determine exit price
+                    c15m = self.client.get_candles(RESOLUTION, 5)
+                    last_c = c15m[-1] if c15m else {"close": entry, "high": entry, "low": entry}
                     exit_price = last_c.get("close", entry)
 
                     if side == "BUY":
                         if last_c.get("high", 0.0) >= tgt or exit_price >= (tgt - 5.0):
                             exit_price = tgt
                             is_win = True
-                            outcome_str, outcome_emoji = "PROFIT TARGET 🎯", "🎉"
+                            outcome_str, outcome_emoji = f"PROFIT TARGET (+₹{MAX_PROFIT_PER_TRADE_INR:.0f}) 🎯", "🎉"
                         else:
                             exit_price = sl
                             is_win = False
-                            outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
+                            outcome_str, outcome_emoji = f"STOP LOSS (-₹{MAX_LOSS_PER_TRADE_INR:.0f}) 🛑", "🛑"
                     else:
                         if last_c.get("low", 999999.0) <= tgt or exit_price <= (tgt + 5.0):
                             exit_price = tgt
                             is_win = True
-                            outcome_str, outcome_emoji = "PROFIT TARGET 🎯", "🎉"
+                            outcome_str, outcome_emoji = f"PROFIT TARGET (+₹{MAX_PROFIT_PER_TRADE_INR:.0f}) 🎯", "🎉"
                         else:
                             exit_price = sl
                             is_win = False
-                            outcome_str, outcome_emoji = "STOP LOSS 🛑", "🛑"
+                            outcome_str, outcome_emoji = f"STOP LOSS (-₹{MAX_LOSS_PER_TRADE_INR:.0f}) 🛑", "🛑"
 
                     pnl_pts = (exit_price - entry) if side == "BUY" else (entry - exit_price)
                     pnl_inr = pnl_pts * qty
@@ -235,18 +237,25 @@ class CloudTradingBot:
                         self.last_loss_time = time.time()
                     self._save_daily_stats()
 
-                    cooldown_text = "\n• *Cooldown*: 60 min patient wait active ⏳" if not is_win else ""
+                    loss_warning = ""
+                    if self.daily_stats.get("losses_today", 0) >= MAX_LOSSES_PER_DAY:
+                        loss_warning = f"\n🔒 *DAILY LOSS LIMIT REACHED ({MAX_LOSSES_PER_DAY} Losses)!* Bot locked until tomorrow to protect capital."
+                    elif not is_win:
+                        loss_warning = f"\n⏳ *Cooldown*: {COOLDOWN_LOSS_MINS} min patient pause active."
+
                     send_telegram(
                         f"🏁 *TRADE CLOSED ({outcome_str})* {outcome_emoji}\n\n"
                         f"• *Pair*: `{SYMBOL}`\n"
                         f"• *Side*: `{side}` ({qty} SOL)\n"
                         f"• *Entry Price*: ₹{entry:,.0f} INR\n"
                         f"• *Exit Price*: ₹{exit_price:,.0f} INR\n"
+                        f"• *Stop Loss (SL)*: ₹{sl:,.0f} 🛑\n"
+                        f"• *Take Profit (TP)*: ₹{tgt:,.0f} 🎯\n"
                         f"• *Net P&L*: *₹{pnl_inr:+.1f} INR* {outcome_emoji}\n\n"
                         f"📊 *Scorecard Today:*\n"
-                        f"• Trades: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY}\n"
-                        f"• Today P&L: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*"
-                        f"{cooldown_text}"
+                        f"• *Trades*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Wins: {self.daily_stats['wins_today']}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
+                        f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*"
+                        f"{loss_warning}"
                     )
                     self.active_trade = None
         except Exception as e:
@@ -463,16 +472,22 @@ class CloudTradingBot:
                 loss_warning = ""
                 if self.daily_stats.get("losses_today", 0) >= MAX_LOSSES_PER_DAY:
                     loss_warning = f"\n🔒 *DAILY LOSS LIMIT REACHED ({MAX_LOSSES_PER_DAY} Losses)!* Bot locked until tomorrow to protect capital."
+                elif not is_win:
+                    loss_warning = f"\n⏳ *Cooldown*: {COOLDOWN_LOSS_MINS} min patient pause active."
 
                 send_telegram(
                     f"🏁 *TRADE CLOSED ({outcome_str})* {outcome_emoji}\n\n"
-                    f"• *Side*: {side} ({qty} SOL)\n"
+                    f"• *Pair*: `{SYMBOL}`\n"
+                    f"• *Side*: `{side}` ({qty} SOL)\n"
                     f"• *Entry Price*: ₹{entry:,.0f} INR\n"
                     f"• *Exit Price*: ₹{exit_price:,.0f} INR\n"
+                    f"• *Stop Loss (SL)*: ₹{sl:,.0f} 🛑\n"
+                    f"• *Take Profit (TP)*: ₹{tgt:,.0f} 🎯\n"
                     f"• *Net P&L*: *₹{pnl_inr:+.1f} INR* {outcome_emoji}\n\n"
                     f"📊 *Scorecard Today:*\n"
-                    f"• Trades: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Wins: {self.daily_stats['wins_today']}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
-                    f"• Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*{loss_warning}"
+                    f"• *Trades*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Wins: {self.daily_stats['wins_today']}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
+                    f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*"
+                    f"{loss_warning}"
                 )
                 self.active_trade = None
             return
@@ -536,6 +551,10 @@ class CloudTradingBot:
             send_telegram(f"⚠️ *Order Blocked by Exchange!*\nReason: `{raw_err}`")
             return
 
+        attach_res = res.get("attach_res", {})
+        tpsl_attached = bool(attach_res.get("success"))
+        tpsl_status_msg = "✅ Active on Shark Exchange (Open Orders & Positions)" if tpsl_attached else "⏳ Attaching on exchange..."
+
         self.last_candle_time = curr_candle["time"]
         self.daily_stats["trades_today"] += 1
         self._save_daily_stats()
@@ -545,19 +564,21 @@ class CloudTradingBot:
             "sl": sl,
             "target": target,
             "qty": CONTRACT_QTY,
-            "risk_pts": risk_pts
+            "risk_pts": risk_pts,
+            "tpsl_attached": tpsl_attached
         }
 
         send_telegram(
             f"🚀 *A+ {signal} (REVERSAL CONFIRMED) ORDER EXECUTED!* 🦈\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
+            f"• *Side*: `{signal}` ({CONTRACT_QTY} SOL)\n"
             f"• *Strategy*: 15m Elastic Reversion + Confirmation\n"
             f"• *Confirmation*: {reversal_detail}\n"
-            f"• *Side*: `{signal}` ({CONTRACT_QTY} SOL)\n"
             f"• *Margin Used*: ~₹{margin_required:,.0f} INR (at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
-            f"• *Stop Loss*: ₹{sl:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss) 🛑\n"
-            f"• *Target*: ₹{target:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit) 🎯\n"
+            f"• *Stop Loss (SL)*: ₹{sl:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss) 🛑\n"
+            f"• *Target (TP)*: ₹{target:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit) 🎯\n"
+            f"• *Exchange TP/SL*: {tpsl_status_msg}\n"
             f"• *15m RSI*: {rsi:.1f} (Stretch: {dist_pct:+.2f}% from EMA 20)\n\n"
             f"📊 *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
             f"🛡️ *Wallet Backup*: ~₹800+ safe in reserve!"
