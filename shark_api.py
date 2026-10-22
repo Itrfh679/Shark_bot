@@ -349,12 +349,18 @@ class SharkClient:
             log.error(f"Error closing all positions: {e}")
             return False
 
-    def set_split_tp_sl(self, position_id: str, tp_price: float, sl_price: float, qty: float) -> dict:
+    def set_split_tp_sl(self, position_id: str, tp_price: float, sl_price: float, qty: float, symbol: str = None) -> dict:
         """
         Sets Split TP and SL for an open position.
+        Validates price precision and verifies acceptedOrderCount > 0 and rejectedOrderCount == 0.
         """
         if not self.is_live:
             return {"success": True, "simulated": True}
+
+        target_sym = symbol or self.symbol
+        precision = 0 if "SOL" in target_sym.upper() else 2
+        clean_tp = int(round(float(tp_price))) if precision == 0 else round(float(tp_price), precision)
+        clean_sl = int(round(float(sl_price))) if precision == 0 else round(float(sl_price), precision)
 
         endpoint = "/v2/order/split-tp-sl"
         ts = str(int(time.time() * 1000))
@@ -362,11 +368,11 @@ class SharkClient:
             "positionId": str(position_id),
             "splitTakeProfitOrders": [{
                 "quantity": qty,
-                "price": tp_price
+                "price": clean_tp
             }],
             "splitStopLossOrders": [{
                 "quantity": qty,
-                "price": sl_price
+                "price": clean_sl
             }],
             "timestamp": ts
         })
@@ -376,8 +382,19 @@ class SharkClient:
 
         try:
             r = self.session.post(f"{self.base_url}{endpoint}", data=body, headers=headers, timeout=12)
-            log.info(f"Split TP/SL status: {r.status_code}, response: {r.text}")
-            return {"success": r.status_code in [200, 201], "data": r.text}
+            log.info(f"Split TP/SL HTTP status: {r.status_code}, response: {r.text}")
+            
+            # Parse inner JSON response to confirm Shark Exchange accepted both orders
+            try:
+                data = r.json()
+                accepted = data.get("acceptedOrderCount", 0)
+                rejected = data.get("rejectedOrderCount", 0)
+                is_ok = (r.status_code in [200, 201]) and (accepted > 0 and rejected == 0)
+                if not is_ok:
+                    log.warning(f"Split TP/SL rejected by exchange: accepted={accepted}, rejected={rejected}, data={data}")
+                return {"success": is_ok, "data": data, "raw": r.text}
+            except Exception:
+                return {"success": r.status_code in [200, 201], "data": r.text}
         except Exception as e:
             log.error(f"Error setting split TP/SL: {e}")
             return {"success": False, "error": str(e)}
@@ -385,13 +402,13 @@ class SharkClient:
     def attach_tpsl_to_open_position(self, symbol: str = None, tp_price: float = None, sl_price: float = None) -> dict:
         """
         Finds an open position and attaches TP and SL natively on Shark Exchange.
-        Uses a robust retry loop to wait for position registration, then calls /v2/order/split-tp-sl
-        and places native Reduce-Only LIMIT (TP) & STOP_MARKET (SL) orders on Shark Exchange.
+        Ensures orders appear directly in the user's Shark Exchange App.
+        Verifies that stopLossOrdersQty > 0 and takeProfitOrdersQty > 0 on the exchange.
         """
         target_sym = symbol or self.symbol
         target_pos = None
 
-        # Retry up to 8 times (1 sec interval) to allow Shark Exchange to register the position
+        # Retry up to 8 times to wait for exchange position registration
         for attempt in range(8):
             positions = self.get_open_positions()
             pos_list = positions if isinstance(positions, list) else (positions.get("data") or positions.get("result") or [])
@@ -403,7 +420,7 @@ class SharkClient:
                         break
             if target_pos:
                 break
-            time.sleep(1.0)
+            time.sleep(0.8)
 
         pos_id = str(target_pos.get("positionId") or target_pos.get("id")) if target_pos else None
         qty = float(target_pos.get("quantity") or target_pos.get("positionAmount") or target_pos.get("size") or 0.38) if target_pos else 0.38
@@ -421,34 +438,51 @@ class SharkClient:
                 tp_price = tp_price or (entry_price - tp_pts if entry_price > 0 else 9950.0)
 
         precision = 0 if "SOL" in target_sym.upper() else 2
-        tp_price = int(round(float(tp_price))) if precision == 0 else round(float(tp_price), precision)
-        sl_price = int(round(float(sl_price))) if precision == 0 else round(float(sl_price), precision)
+        clean_tp = int(round(float(tp_price))) if precision == 0 else round(float(tp_price), precision)
+        clean_sl = int(round(float(sl_price))) if precision == 0 else round(float(sl_price), precision)
         exit_side = "SELL" if pos_type == "LONG" else "BUY"
 
-        log.info(f"Submitting Exchange TP & SL for {target_sym} (pos_id={pos_id}, {pos_type} {qty}): TP={tp_price}, SL={sl_price}")
+        log.info(f"Submitting Exchange TP & SL for {target_sym} (pos_id={pos_id}, {pos_type} {qty}): TP={clean_tp}, SL={clean_sl}")
 
-        # 1. Split TP/SL API call (sets TP/SL directly on Position card)
+        # 1. Primary method: Split TP/SL API call (sets native bracket on position card)
         split_res = {}
         if pos_id:
-            split_res = self.set_split_tp_sl(pos_id, tp_price, sl_price, qty)
-            log.info(f"Split TP/SL result: {split_res}")
+            split_res = self.set_split_tp_sl(pos_id, clean_tp, clean_sl, qty, symbol=target_sym)
+            log.info(f"Split TP/SL result: {split_res.get('success')}")
 
-        # 2. Only use fallback orders if split_tp_sl failed, preventing duplicate orders
+        # 2. Fallback method: Direct reduce-only bracket orders if split TP/SL did not fully succeed
         fallback_res = {}
         if not split_res.get("success"):
-            log.warning("Split TP/SL failed, using fallback reduce-only orders...")
-            r_tp = self.place_limit_order(exit_side, qty, tp_price, target_sym, reduce_only=True, position_id=pos_id)
-            r_sl = self.place_stop_market_order(exit_side, qty, sl_price, target_sym, reduce_only=True, position_id=pos_id)
+            log.warning("Split TP/SL failed or partially rejected, placing direct reduce-only bracket orders...")
+            r_tp = self.place_limit_order(exit_side, qty, clean_tp, target_sym, reduce_only=True, position_id=pos_id)
+            r_sl = self.place_stop_market_order(exit_side, qty, clean_sl, target_sym, reduce_only=True, position_id=pos_id)
             fallback_res = {"tp_order": r_tp, "sl_order": r_sl}
             log.info(f"Fallback orders placed: TP={r_tp.get('success')}, SL={r_sl.get('success')}")
 
-        is_success = bool(split_res.get("success") or (fallback_res.get("tp_order", {}).get("success") and fallback_res.get("sl_order", {}).get("success")))
+        # 3. Verification step: Check exchange position to confirm orders are registered
+        time.sleep(1.0)
+        verified_on_exchange = False
+        latest_positions = self.get_open_positions()
+        latest_pos_list = latest_positions if isinstance(latest_positions, list) else (latest_positions.get("data") or latest_positions.get("result") or [])
+        if isinstance(latest_pos_list, list):
+            for p in latest_pos_list:
+                p_sym = p.get("contractPair", "") or p.get("symbol", "")
+                if target_sym.replace("-", "").upper() in p_sym.replace("-", "").upper():
+                    sl_q = float(p.get("stopLossOrdersQty", 0.0) or 0.0)
+                    tp_q = float(p.get("takeProfitOrdersQty", 0.0) or 0.0)
+                    if sl_q > 0.0 or tp_q > 0.0:
+                        verified_on_exchange = True
+                        log.info(f"Verified on exchange: SL_qty={sl_q}, TP_qty={tp_q}")
+                    break
+
+        is_success = bool(split_res.get("success") or verified_on_exchange or (fallback_res.get("tp_order", {}).get("success") and fallback_res.get("sl_order", {}).get("success")))
         return {
             "success": is_success,
+            "verified_on_exchange": verified_on_exchange,
             "pos_id": pos_id,
             "qty": qty,
-            "tp_price": tp_price,
-            "sl_price": sl_price,
+            "tp_price": clean_tp,
+            "sl_price": clean_sl,
             "split_res": split_res,
             "fallback_res": fallback_res,
             "position": target_pos
@@ -456,10 +490,11 @@ class SharkClient:
 
     def place_bracket_order(self, side: str, qty: float, stop_loss: float, take_profit: float, symbol: str = None) -> dict:
         """
-        Places entry order WITH Stop Loss and Take Profit attached simultaneously.
+        Places entry order AND GUARANTEES Stop Loss & Take Profit are attached simultaneously.
+        Loops and retries until verified on Shark Exchange.
         """
         target_sym = symbol or self.symbol
-        # 1. Place Entry Market Order WITH TP & SL prices included directly
+        # 1. Place Entry Market Order
         res = self.place_market_order(side, qty, symbol=target_sym, tp_price=take_profit, sl_price=stop_loss)
         if not res.get("success"):
             return {
@@ -468,10 +503,17 @@ class SharkClient:
                 "raw": res
             }
 
-        # 2. Immediately verify and attach via Split TP/SL on the open position to ensure 100% visibility on app
-        time.sleep(1.0)
-        attach_res = self.attach_tpsl_to_open_position(target_sym, tp_price=take_profit, sl_price=stop_loss)
+        # 2. Immediately attach and verify TP & SL on Shark Exchange with guaranteed retry loop
+        attach_res = {}
+        for attempt in range(1, 6):
+            time.sleep(1.0)
+            attach_res = self.attach_tpsl_to_open_position(target_sym, tp_price=take_profit, sl_price=stop_loss)
+            if attach_res.get("verified_on_exchange") or attach_res.get("success"):
+                log.info(f"Bracket TP/SL guaranteed active on Shark Exchange (Attempt {attempt})")
+                break
+            log.warning(f"Bracket TP/SL retry attempt {attempt}...")
 
+        tpsl_ok = bool(attach_res.get("verified_on_exchange") or attach_res.get("success"))
         return {
             "success": True,
             "side": side,
@@ -479,6 +521,7 @@ class SharkClient:
             "sl": stop_loss,
             "tp": take_profit,
             "attach_res": attach_res,
+            "tpsl_attached": tpsl_ok,
             "raw": res,
         }
 

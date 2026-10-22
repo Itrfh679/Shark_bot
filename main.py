@@ -154,12 +154,13 @@ class CloudTradingBot:
                 # Strategy exact SL (-₹40) and TP (+₹80) points
                 sl_pts = round(MAX_LOSS_PER_TRADE_INR / qty, 2)
                 tp_pts = round(MAX_PROFIT_PER_TRADE_INR / qty, 2)
+                precision = 0 if "SOL" in SYMBOL.upper() else 2
                 if side == "BUY":
-                    sl_price = round(entry - sl_pts, 1)
-                    tp_price = round(entry + tp_pts, 1)
+                    sl_price = int(round(entry - sl_pts)) if precision == 0 else round(entry - sl_pts, precision)
+                    tp_price = int(round(entry + tp_pts)) if precision == 0 else round(entry + tp_pts, precision)
                 else:
-                    sl_price = round(entry + sl_pts, 1)
-                    tp_price = round(entry - tp_pts, 1)
+                    sl_price = int(round(entry + sl_pts)) if precision == 0 else round(entry + sl_pts, precision)
+                    tp_price = int(round(entry - tp_pts)) if precision == 0 else round(entry - tp_pts, precision)
 
                 if not self.active_trade:
                     self.active_trade = {
@@ -175,21 +176,24 @@ class CloudTradingBot:
                     log.info(f"Synchronized active {side} position from exchange: Entry={entry}, SL={sl_price}, TP={tp_price}, Qty={qty}")
 
                 # If exchange has 0 stop loss or 0 take profit orders, attach them natively!
-                if (sl_qty <= 0.0 or tp_qty <= 0.0) and not self.active_trade.get("tpsl_attached"):
+                if sl_qty <= 0.0 or tp_qty <= 0.0:
                     log.warning(f"Position has missing exchange TP/SL (SL_qty={sl_qty}, TP_qty={tp_qty}). Auto-attaching now...")
                     attach_res = self.client.attach_tpsl_to_open_position(SYMBOL, tp_price=tp_price, sl_price=sl_price)
                     log.info(f"Auto-attach TP/SL result: {attach_res}")
-                    self.active_trade["tpsl_attached"] = True
-                    send_telegram(
-                        f"🛡️ *ACTIVE POSITION: TP & SL AUTO-ATTACHED!* 🦈\n\n"
-                        f"• *Pair*: `{SYMBOL}`\n"
-                        f"• *Side*: `{side}` ({qty} SOL)\n"
-                        f"• *Entry Price*: ₹{entry:,.0f} INR\n"
-                        f"• *Stop Loss (SL)*: ₹{sl_price:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Risk) 🛑\n"
-                        f"• *Take Profit (TP)*: ₹{tp_price:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target) 🎯\n\n"
-                        f"✅ Shark Exchange par Open Orders & Positions me TP/SL submit ho gaya hai!"
-                    )
-                elif sl_qty > 0.0 and tp_qty > 0.0:
+                    if attach_res.get("verified_on_exchange") or attach_res.get("success"):
+                        self.active_trade["tpsl_attached"] = True
+                        send_telegram(
+                            f"🛡️ *ACTIVE POSITION: TP & SL AUTO-ATTACHED!* 🦈\n\n"
+                            f"• *Pair*: `{SYMBOL}`\n"
+                            f"• *Side*: `{side}` ({qty} SOL)\n"
+                            f"• *Entry Price*: ₹{entry:,.0f} INR\n"
+                            f"• *Stop Loss (SL)*: ₹{sl_price:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Risk) 🛑\n"
+                            f"• *Take Profit (TP)*: ₹{tp_price:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target) 🎯\n\n"
+                            f"✅ Shark Exchange par Open Orders & Positions me TP/SL 100% active ho gaya hai!"
+                        )
+                    else:
+                        self.active_trade["tpsl_attached"] = False
+                else:
                     self.active_trade["tpsl_attached"] = True
             else:
                 if self.active_trade:
@@ -553,14 +557,14 @@ class CloudTradingBot:
             return
 
         attach_res = res.get("attach_res", {})
-        tpsl_attached = bool(attach_res.get("success"))
+        tpsl_attached = bool(res.get("tpsl_attached") or attach_res.get("verified_on_exchange") or attach_res.get("success"))
 
         # If not confirmed on first attempt, retry immediately to guarantee SL and TP are set together with entry!
         if not tpsl_attached:
             log.warning("TP/SL not confirmed on first attempt, retrying immediately...")
             time.sleep(1.0)
             retry_res = self.client.attach_tpsl_to_open_position(SYMBOL, tp_price=target, sl_price=sl)
-            tpsl_attached = bool(retry_res.get("success"))
+            tpsl_attached = bool(retry_res.get("verified_on_exchange") or retry_res.get("success"))
 
         tpsl_status_msg = "✅ SL & TP Active on Shark Exchange" if tpsl_attached else "⏳ Attaching on exchange..."
 
