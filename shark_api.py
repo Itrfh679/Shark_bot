@@ -420,8 +420,9 @@ class SharkClient:
                 sl_price = sl_price or (entry_price + sl_pts if entry_price > 0 else 10250.0)
                 tp_price = tp_price or (entry_price - tp_pts if entry_price > 0 else 9950.0)
 
-        tp_price = round(float(tp_price), 1)
-        sl_price = round(float(sl_price), 1)
+        precision = 0 if "SOL" in target_sym.upper() else 2
+        tp_price = int(round(float(tp_price))) if precision == 0 else round(float(tp_price), precision)
+        sl_price = int(round(float(sl_price))) if precision == 0 else round(float(sl_price), precision)
         exit_side = "SELL" if pos_type == "LONG" else "BUY"
 
         log.info(f"Submitting Exchange TP & SL for {target_sym} (pos_id={pos_id}, {pos_type} {qty}): TP={tp_price}, SL={sl_price}")

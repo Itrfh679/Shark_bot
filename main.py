@@ -531,12 +531,13 @@ class CloudTradingBot:
         sl_pts = round(MAX_LOSS_PER_TRADE_INR / CONTRACT_QTY, 2)
         tp_pts = round(MAX_PROFIT_PER_TRADE_INR / CONTRACT_QTY, 2)
 
+        precision = 0 if "SOL" in SYMBOL.upper() else 2
         if signal == "BUY":
-            sl = round(entry - sl_pts, 2)
-            target = round(entry + tp_pts, 2)
+            sl = int(round(entry - sl_pts)) if precision == 0 else round(entry - sl_pts, precision)
+            target = int(round(entry + tp_pts)) if precision == 0 else round(entry + tp_pts, precision)
         else:
-            sl = round(entry + sl_pts, 2)
-            target = round(entry - tp_pts, 2)
+            sl = int(round(entry + sl_pts)) if precision == 0 else round(entry + sl_pts, precision)
+            target = int(round(entry - tp_pts)) if precision == 0 else round(entry - tp_pts, precision)
 
         risk_pts = abs(entry - sl)
         expected_risk = risk_pts * CONTRACT_QTY
