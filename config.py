@@ -30,4 +30,6 @@ RSI_OVERSOLD               = 25.0       # Extreme panic dump (Buy trigger)
 RSI_OVERBOUGHT             = 75.0       # Extreme greed peak (Sell trigger)
 EMA_STRETCH_PCT            = 1.2        # Minimum 1.2% stretch from EMA 20
 REQUIRE_REVERSAL_CONFIRM   = True       # Reversal Confirmation: Red candle for Sell, Green candle for Buy
+MIN_REVERSAL_BODY_PTS      = 25.0       # Minimum 25 pts solid candle body for reversal confirmation (filters out fake dojis)
+MIN_RSI_HOOK_DELTA         = 1.5        # Minimum +1.5 RSI hook to confirm actual momentum turnaround
 

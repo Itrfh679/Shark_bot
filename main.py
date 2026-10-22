@@ -23,7 +23,8 @@ from config import (
     MAX_LOSS_PER_TRADE_INR, MAX_PROFIT_PER_TRADE_INR,
     MAX_LOSSES_PER_DAY, MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
     RESOLUTION, EMA_PERIOD, RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
-    EMA_STRETCH_PCT, REQUIRE_REVERSAL_CONFIRM
+    EMA_STRETCH_PCT, REQUIRE_REVERSAL_CONFIRM,
+    MIN_REVERSAL_BODY_PTS, MIN_RSI_HOOK_DELTA
 )
 from shark_api import SharkClient
 
@@ -370,8 +371,7 @@ class CloudTradingBot:
             f"• *Strategy*: 15m Elastic Mean Reversion + Reversal Confirmation 🛡️\n"
             f"• *Trade Size*: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
             f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
-            f"• *Take Profit*: Exact +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit (1:2.0 RR) 🎯\n"
-            f"• *Confirmation*: 🔴 Red candle for SELL | 🟢 Green candle for BUY ✅\n"
+            f"• *Confirmation*: Solid Body (≥{MIN_REVERSAL_BODY_PTS:.0f} pts) + RSI Momentum Hook 🎯\n"
             f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
             f"• *Phone Status*: You can close your phone/Termux now! 📱💤\n\n"
             f"👉 Send `/status` or `/balance` anytime to inspect!"
@@ -511,22 +511,30 @@ class CloudTradingBot:
         reversal_detail = ""
 
         # BUY: Was in deep oversold (current or prev candle RSI <= 25 & dist <= -1.2%),
-        # AND current candle is GREEN (close > open), confirming buyers stepped in!
+        # AND current candle has SOLID GREEN body (>= 25 pts) or strong Hammer Rejection wick,
+        # AND RSI has hooked upward (rsi >= prev_rsi + MIN_RSI_HOOK_DELTA)!
         is_oversold = (rsi <= RSI_OVERSOLD or prev_rsi <= RSI_OVERSOLD) and (dist_pct <= -EMA_STRETCH_PCT or prev_dist <= -EMA_STRETCH_PCT)
-        bullish_reversal = (curr_candle["close"] > curr_candle["open"]) if REQUIRE_REVERSAL_CONFIRM else True
+        green_body = curr_candle["close"] - curr_candle["open"]
+        lower_wick = min(curr_candle["open"], curr_candle["close"]) - curr_candle["low"]
+        solid_bounce = (green_body >= MIN_REVERSAL_BODY_PTS) or (green_body > 0 and lower_wick >= 2 * green_body and lower_wick >= 30.0)
+        rsi_hook_up = (rsi >= prev_rsi + MIN_RSI_HOOK_DELTA)
 
-        if is_oversold and bullish_reversal:
+        if is_oversold and solid_bounce and rsi_hook_up:
             signal = "BUY"
-            reversal_detail = "🟢 Green Candle Bounce (Buyers confirmed)"
+            reversal_detail = f"🟢 Solid Green Reversal (+{green_body:.0f} pts) & RSI Hooked Up ({prev_rsi:.1f} ↗ {rsi:.1f})"
 
         # SELL: Was in extreme overbought (current or prev candle RSI >= 75 & dist >= 1.2%),
-        # AND current candle is RED (close < open), confirming sellers took over!
+        # AND current candle has SOLID RED body (>= 25 pts) or strong Shooting Star wick,
+        # AND RSI has hooked downward (rsi <= prev_rsi - MIN_RSI_HOOK_DELTA)!
         is_overbought = (rsi >= RSI_OVERBOUGHT or prev_rsi >= RSI_OVERBOUGHT) and (dist_pct >= EMA_STRETCH_PCT or prev_dist >= EMA_STRETCH_PCT)
-        bearish_reversal = (curr_candle["close"] < curr_candle["open"]) if REQUIRE_REVERSAL_CONFIRM else True
+        red_body = curr_candle["open"] - curr_candle["close"]
+        upper_wick = curr_candle["high"] - max(curr_candle["open"], curr_candle["close"])
+        solid_rejection = (red_body >= MIN_REVERSAL_BODY_PTS) or (red_body > 0 and upper_wick >= 2 * red_body and upper_wick >= 30.0)
+        rsi_hook_down = (rsi <= prev_rsi - MIN_RSI_HOOK_DELTA)
 
-        if is_overbought and bearish_reversal:
+        if is_overbought and solid_rejection and rsi_hook_down:
             signal = "SELL"
-            reversal_detail = "🔴 Red Candle Rejection (Sellers confirmed)"
+            reversal_detail = f"🔴 Solid Red Rejection (-{red_body:.0f} pts) & RSI Hooked Down ({prev_rsi:.1f} ↘ {rsi:.1f})"
 
         if not signal:
             return
