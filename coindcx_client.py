@@ -7,7 +7,7 @@ import requests
 
 from config import (
     COINDCX_API_KEY, COINDCX_API_SECRET, COINDCX_BASE_URL,
-    MAX_MARGIN_PER_TRADE_INR, DEFAULT_LEVERAGE
+    COINDCX_MAX_MARGIN_INR, COINDCX_DEFAULT_LEVERAGE
 )
 
 log = logging.getLogger("CoinDCXClient")
@@ -100,7 +100,7 @@ class CoinDCXClient:
             log.error(f"Ticker error: {e}")
         return {}
 
-    def calculate_quantity(self, pair: str, entry_price: float, margin_inr: float = MAX_MARGIN_PER_TRADE_INR, leverage: int = DEFAULT_LEVERAGE) -> float:
+    def calculate_quantity(self, pair: str, entry_price: float, margin_inr: float = COINDCX_MAX_MARGIN_INR, leverage: int = COINDCX_DEFAULT_LEVERAGE) -> float:
         """
         Calculates exact contract quantity so margin strictly equals margin_inr (e.g. ₹150).
         Total position value (in USD) = (margin_inr / usd_inr_rate) * leverage
@@ -127,7 +127,7 @@ class CoinDCXClient:
 
     def place_futures_order(self, pair: str, side: str, order_type: str = "market_order",
                             price: float = None, quantity: float = None,
-                            leverage: int = DEFAULT_LEVERAGE) -> dict:
+                            leverage: int = COINDCX_DEFAULT_LEVERAGE) -> dict:
         """
         Places a futures order on CoinDCX.
         pair: e.g. 'B-BTC_USDT', 'B-SOL_USDT'
