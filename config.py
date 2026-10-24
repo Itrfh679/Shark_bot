@@ -9,7 +9,7 @@ RENDER_DEPLOY_HOOK = os.getenv("RENDER_DEPLOY_HOOK", "https://api.render.com/dep
 
 
 # Telegram Bot
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8959389105:AAGza59y2PmqfDrybiZnYJjcAvyIhKLU3w0")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7319679215:AAFO1F_mCJ03bh62BT3QobTdeUWflX1D5HY")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "5706939133")
 
 # Strategy & Risk Management: 15m Elastic Mean Reversion (₹150 Margin, ₹40 Risk / ₹80 Profit)
