@@ -33,10 +33,3 @@ REQUIRE_REVERSAL_CONFIRM   = True       # Reversal Confirmation: Red candle for 
 MIN_REVERSAL_BODY_PTS      = 25.0       # Minimum 25 pts solid candle body for reversal confirmation (filters out fake dojis)
 MIN_RSI_HOOK_DELTA         = 1.5        # Minimum +1.5 RSI hook to confirm actual momentum turnaround
 
-# CoinDCX Credentials & Budget
-COINDCX_API_KEY            = os.getenv("COINDCX_API_KEY", "b4ba8cd6e78e7c91c3c8e24de158829059fa79ce1ebf011e")
-COINDCX_API_SECRET         = os.getenv("COINDCX_API_SECRET", "fc7886b574e6068b6d5f26d8a4fce65bd7e6806363be6b06a54caac4c8df9c60")
-COINDCX_BASE_URL           = "https://api.coindcx.com"
-COINDCX_MAX_MARGIN_INR     = 150.0      # Strict ₹150 Max Margin per CoinDCX trade
-COINDCX_DEFAULT_LEVERAGE   = 15         # Standard 15x leverage for CoinDCX Expert Picks
-
