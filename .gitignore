@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 backtest_cache/
 backtest_summary.json
+backtest_*.py

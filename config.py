@@ -12,24 +12,21 @@ RENDER_DEPLOY_HOOK = os.getenv("RENDER_DEPLOY_HOOK", "https://api.render.com/dep
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7319679215:AAFO1F_mCJ03bh62BT3QobTdeUWflX1D5HY")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "5706939133")
 
-# Strategy & Risk Management: 15m Elastic Mean Reversion (₹150 Margin, ₹40 Risk / ₹80 Profit)
+# Strategy & Risk Management: Triple-Screen MTF Trend-Rider (₹150 Margin, ₹40 Risk / ₹90 Profit)
 LEVERAGE                   = 25
-CONTRACT_QTY               = 0.38       # Exactly ₹150 Margin at 25x (~₹3,800 trade value)
+CONTRACT_QTY               = 0.38       # Exactly ₹150 Margin at 25x (~₹3,700 trade value)
 MARGIN_REQUIRED            = 150.0      # ₹150 INR margin per trade
 MAX_LOSS_PER_TRADE_INR     = 40.0       # Exact ₹40 Max Loss per trade
-MAX_PROFIT_PER_TRADE_INR   = 80.0       # Exact +₹80 Max Profit per trade (1:2.0 RR)
+MAX_PROFIT_PER_TRADE_INR   = 90.0       # Sweet Spot: +₹90 Max Profit per trade (1:2.25 RR)
 MAX_LOSSES_PER_DAY         = 2          # Daily Circuit Breaker: 2 Losses Max (Stops at ₹80 loss)
-MAX_TRADES_PER_DAY         = 5          # Winning Mode: up to 5 trades if winning
+MAX_TRADES_PER_DAY         = 20         # Unlimited Wins Mode: restricted only by 2 daily losses
 COOLDOWN_LOSS_MINS         = 30         # 30-min patience pause after any loss
 
-# 15-Minute Elastic Mean Reversion + Reversal Candle Confirmation
-RESOLUTION                 = "15m"      # Clean 15-Minute timeframe (zero 5m noise)
-EMA_PERIOD                 = 20         # 15m EMA 20 (Average equilibrium price)
-RSI_PERIOD                 = 14         # 15m RSI 14
-RSI_OVERSOLD               = 25.0       # Extreme panic dump (Buy trigger)
-RSI_OVERBOUGHT             = 75.0       # Extreme greed peak (Sell trigger)
-EMA_STRETCH_PCT            = 1.2        # Minimum 1.2% stretch from EMA 20
-REQUIRE_REVERSAL_CONFIRM   = True       # Reversal Confirmation: Red candle for Sell, Green candle for Buy
-MIN_REVERSAL_BODY_PTS      = 25.0       # Minimum 25 pts solid candle body for reversal confirmation (filters out fake dojis)
-MIN_RSI_HOOK_DELTA         = 1.5        # Minimum +1.5 RSI hook to confirm actual momentum turnaround
+# Multi-Timeframe Trend & Pullback Rejection Parameters
+RESOLUTION_1D              = "1d"       # Screen 1: Daily Macro Trend
+RESOLUTION_4H              = "4h"       # Screen 2: 4-Hour Trend Confirmation
+RESOLUTION_1H              = "1h"       # Screen 3: 1-Hour Pullback Entry
+EMA_TREND_PERIOD           = 20         # 20 EMA for 1D, 4H, and 1H
+EMA_FILTER_PERIOD          = 50         # 50 EMA for 1H alignment
+MIN_REJECTION_BODY_PTS     = 20.0       # Minimum 20 pts solid candle body for pullback rejection
 

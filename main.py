@@ -22,9 +22,8 @@ from config import (
     LEVERAGE, CONTRACT_QTY, MARGIN_REQUIRED,
     MAX_LOSS_PER_TRADE_INR, MAX_PROFIT_PER_TRADE_INR,
     MAX_LOSSES_PER_DAY, MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
-    RESOLUTION, EMA_PERIOD, RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
-    EMA_STRETCH_PCT, REQUIRE_REVERSAL_CONFIRM,
-    MIN_REVERSAL_BODY_PTS, MIN_RSI_HOOK_DELTA
+    RESOLUTION_1D, RESOLUTION_4H, RESOLUTION_1H,
+    EMA_TREND_PERIOD, EMA_FILTER_PERIOD, MIN_REJECTION_BODY_PTS
 )
 from shark_api import SharkClient
 
@@ -297,13 +296,13 @@ class CloudTradingBot:
         if cmd_lower in ["/start", "/run", "start", "run"]:
             self.is_running = True
             send_telegram(
-                "🟢 *Cloud Bot Started / Resumed!*\n\n"
+                "🟢 *Shark MTF Trend Bot Started / Resumed!*\n\n"
                 f"• Asset: `{SYMBOL}`\n"
-                f"• Strategy: 15m Elastic Mean Reversion (Rubber-Band)\n"
+                f"• Strategy: Triple-Screen MTF Trend-Rider (1D ➡️ 4H ➡️ 1H Pullback)\n"
                 f"• Size: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
                 f"• Stop Loss: ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
-                f"• Take Profit: +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit (1:2.0 RR) 🎯\n"
-                f"• Daily Limits: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) / Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
+                f"• Take Profit: +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target (1:2.25 RR) 🎯\n"
+                f"• Daily Circuit Breaker: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Unlimited Wins Mode 🔒\n"
                 f"• Status: Active 24x7 scanning in Cloud."
             )
 
@@ -312,20 +311,29 @@ class CloudTradingBot:
             send_telegram("⏸️ *Cloud Bot Paused!*\nScanning stopped. Send `/start` to resume.")
 
         elif cmd_lower in ["/status", "status"]:
-            c15m = self.client.get_candles(RESOLUTION, 5)
-            curr_price = c15m[-1]["close"] if c15m else 0.0
+            c1d = self.client.get_candles(RESOLUTION_1D, 25)
+            c4h = self.client.get_candles(RESOLUTION_4H, 25)
+            c1h = self.client.get_candles(RESOLUTION_1H, 25)
+            curr_price = c1h[-1]["close"] if c1h else 0.0
+
+            t_1d_str = "BULLISH 🟢" if (c1d and len(c1d) >= 20 and c1d[-1]["close"] > calc_ema([c["close"] for c in c1d], 20)[-1]) else "BEARISH 🔴"
+            t_4h_str = "BULLISH 🟢" if (c4h and len(c4h) >= 20 and c4h[-1]["close"] > calc_ema([c["close"] for c in c4h], 20)[-1]) else "BEARISH 🔴"
+            bias_str = "SHORT ONLY 📉" if ("BEARISH" in t_1d_str and "BEARISH" in t_4h_str) else ("LONG ONLY 📈" if ("BULLISH" in t_1d_str and "BULLISH" in t_4h_str) else "NEUTRAL / CHOP ⏸️")
+
             if self.active_trade:
                 pos_text = f"{self.active_trade['side']} (Entry: ₹{self.active_trade['entry']:,.0f}, SL: ₹{self.active_trade['sl']:,.0f}, TP: ₹{self.active_trade['target']:,.0f})"
             else:
-                pos_text = "No Open Trade (Waiting Setup)"
+                pos_text = f"No Open Trade (Waiting 1H Pullback in {bias_str})"
             state = "🟢 RUNNING" if self.is_running else "⏸️ PAUSED"
             send_telegram(
-                f"📊 *Cloud Bot Status Report* ☁️\n\n"
+                f"📊 *Shark MTF Trend Bot Status* ☁️\n\n"
                 f"• *Status*: {state}\n"
-                f"• *Cloud Server IP*: `{self.public_ip}`\n"
                 f"• *Current SOL Price*: ₹{curr_price:,.0f} INR\n"
+                f"• *1-Day Macro Trend*: {t_1d_str}\n"
+                f"• *4-Hour Confirmation*: {t_4h_str}\n"
+                f"• *Strategy Mode*: *{bias_str}*\n"
                 f"• *Active Position*: {pos_text}\n"
-                f"• *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
+                f"• *Trades Today*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
                 f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*\n"
                 f"• *Uptime*: 24×7 Cloud Active (No phone needed)"
             )
@@ -365,14 +373,14 @@ class CloudTradingBot:
         self.detect_public_ip()
 
         send_telegram(
-            f"🦈 *SHARK EXCHANGE 24x7 CLOUD BOT ONLINE!* ☁️\n\n"
-            f"• *Cloud Server IP*: `{self.public_ip}`\n"
+            f"🦈 *SHARK MTF TREND-RIDER BOT ONLINE!* ☁️\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Strategy*: 15m Elastic Mean Reversion + Reversal Confirmation 🛡️\n"
+            f"• *Strategy*: Triple-Screen MTF Trend-Rider (1D ➡️ 4H ➡️ 1H Pullback) 🛡️\n"
             f"• *Trade Size*: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
             f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
-            f"• *Confirmation*: Solid Body (≥{MIN_REVERSAL_BODY_PTS:.0f} pts) + RSI Momentum Hook 🎯\n"
-            f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Max {MAX_TRADES_PER_DAY} Trades 🔒\n"
+            f"• *Take Profit*: Exact +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target (1:2.25 RR) 🎯\n"
+            f"• *Rejection Filter*: Solid Body (≥{MIN_REJECTION_BODY_PTS:.0f} pts) from 20 EMA 🎯\n"
+            f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Unlimited Wins Mode 🔒\n"
             f"• *Phone Status*: You can close your phone/Termux now! 📱💤\n\n"
             f"👉 Send `/status` or `/balance` anytime to inspect!"
         )
@@ -393,37 +401,50 @@ class CloudTradingBot:
         # Sync open positions with exchange
         self.sync_active_trade_from_exchange()
 
-        # Fetch 15m candles
-        c15m = self.client.get_candles(RESOLUTION, 80)
-        if len(c15m) < 30:
+        # Fetch Multi-Timeframe candles: 1D, 4H, and 1H
+        c1d = self.client.get_candles(RESOLUTION_1D, 30)
+        c4h = self.client.get_candles(RESOLUTION_4H, 30)
+        c1h = self.client.get_candles(RESOLUTION_1H, 60)
+
+        if len(c1d) < 20 or len(c4h) < 20 or len(c1h) < 50:
             return
 
-        closes_15m = [c["close"] for c in c15m]
-        ema20_15m  = calc_ema(closes_15m, EMA_PERIOD)
-        rsi        = calc_rsi(closes_15m, RSI_PERIOD)
+        # 1-Day Trend (20 EMA)
+        closes_1d = [c["close"] for c in c1d]
+        ema20_1d  = calc_ema(closes_1d, EMA_TREND_PERIOD)
+        trend_1d  = 1 if closes_1d[-1] > ema20_1d[-1] else -1
 
-        curr_candle = c15m[-1]
-        prev_candle = c15m[-2] if len(c15m) >= 2 else curr_candle
+        # 4-Hour Trend (20 EMA)
+        closes_4h = [c["close"] for c in c4h]
+        ema20_4h  = calc_ema(closes_4h, EMA_TREND_PERIOD)
+        trend_4h  = 1 if closes_4h[-1] > ema20_4h[-1] else -1
+
+        # 1-Hour Pullback Levels (20 EMA & 50 EMA)
+        closes_1h = [c["close"] for c in c1h]
+        ema20_1h  = calc_ema(closes_1h, EMA_TREND_PERIOD)
+        ema50_1h  = calc_ema(closes_1h, EMA_FILTER_PERIOD)
+
+        curr_candle = c1h[-1]
+        prev_candle = c1h[-2] if len(c1h) >= 2 else curr_candle
         sol_price   = curr_candle["close"]
-        ema_val     = ema20_15m[-1]
-        dist_pct    = ((sol_price - ema_val) / ema_val) * 100.0
 
-        prev_closes = closes_15m[:-1]
-        prev_rsi    = calc_rsi(prev_closes, RSI_PERIOD)
-        prev_ema    = ema20_15m[-2] if len(ema20_15m) >= 2 else ema_val
-        prev_dist   = ((prev_candle["close"] - prev_ema) / prev_ema) * 100.0
+        t_1d_str = "BULLISH 🟢" if trend_1d == 1 else "BEARISH 🔴"
+        t_4h_str = "BULLISH 🟢" if trend_4h == 1 else "BEARISH 🔴"
+        bias_str = "SHORT ONLY 📉" if (trend_1d == -1 and trend_4h == -1) else ("LONG ONLY 📈" if (trend_1d == 1 and trend_4h == 1) else "NEUTRAL / CHOP ⏸️")
 
         # Heartbeat every 1 hour
         now = time.time()
         if now - self.last_heartbeat_time >= 3600:
             self.last_heartbeat_time = now
-            pos_str = f"{self.active_trade['side']} (₹{self.active_trade['entry']:,.0f})" if self.active_trade else "No Open Trade (Waiting Setup)"
+            pos_str = f"{self.active_trade['side']} (₹{self.active_trade['entry']:,.0f})" if self.active_trade else f"Scanning ({bias_str})"
             send_telegram(
-                f"💓 *Shark Cloud Bot Heartbeat (Active)* 🟢\n\n"
+                f"💓 *Shark MTF Trend Bot Heartbeat* 🟢\n\n"
                 f"• *SOL Price*: ₹{sol_price:,.0f} INR\n"
-                f"• *15m RSI*: {rsi:.1f} | *EMA 20*: ₹{ema_val:,.0f} ({dist_pct:+.2f}%)\n"
+                f"• *1-Day Trend*: {t_1d_str} (EMA 20: ₹{ema20_1d[-1]:,.0f})\n"
+                f"• *4-Hour Trend*: {t_4h_str} (EMA 20: ₹{ema20_4h[-1]:,.0f})\n"
+                f"• *Strategy Mode*: *{bias_str}*\n"
                 f"• *Status*: {pos_str}\n"
-                f"• *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
+                f"• *Trades Today*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
                 f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*\n"
                 f"• *Cloud Host*: Online 24×7 🛡️"
             )
@@ -489,52 +510,47 @@ class CloudTradingBot:
                     f"• *Take Profit (TP)*: ₹{tgt:,.0f} 🎯\n"
                     f"• *Net P&L*: *₹{pnl_inr:+.1f} INR* {outcome_emoji}\n\n"
                     f"📊 *Scorecard Today:*\n"
-                    f"• *Trades*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Wins: {self.daily_stats['wins_today']}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
+                    f"• *Trades*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats['wins_today']}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
                     f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*"
                     f"{loss_warning}"
                 )
                 self.active_trade = None
             return
 
-        # Entry constraints
+        # Entry constraints: Stop if 2 losses today, or in 30-min loss cooldown, or same candle
         if self.daily_stats.get("losses_today", 0) >= MAX_LOSSES_PER_DAY:
-            return
-        if self.daily_stats["trades_today"] >= MAX_TRADES_PER_DAY:
             return
         if self.last_loss_time > 0 and (time.time() - self.last_loss_time < COOLDOWN_LOSS_MINS * 60):
             return
         if curr_candle["time"] == self.last_candle_time:
             return
 
-        # 15m Elastic Mean Reversion Entry Signals with Reversal Candle Confirmation
+        # Triple-Screen Multi-Timeframe Entry Logic
         signal = None
         reversal_detail = ""
 
-        # BUY: Was in deep oversold (current or prev candle RSI <= 25 & dist <= -1.2%),
-        # AND current candle has SOLID GREEN body (>= 25 pts) or strong Hammer Rejection wick,
-        # AND RSI has hooked upward (rsi >= prev_rsi + MIN_RSI_HOOK_DELTA)!
-        is_oversold = (rsi <= RSI_OVERSOLD or prev_rsi <= RSI_OVERSOLD) and (dist_pct <= -EMA_STRETCH_PCT or prev_dist <= -EMA_STRETCH_PCT)
-        green_body = curr_candle["close"] - curr_candle["open"]
-        lower_wick = min(curr_candle["open"], curr_candle["close"]) - curr_candle["low"]
-        solid_bounce = (green_body >= MIN_REVERSAL_BODY_PTS) or (green_body > 0 and lower_wick >= 2 * green_body and lower_wick >= 30.0)
-        rsi_hook_up = (rsi >= prev_rsi + MIN_RSI_HOOK_DELTA)
+        high_1h  = curr_candle["high"]
+        low_1h   = curr_candle["low"]
+        open_1h  = curr_candle["open"]
+        close_1h = curr_candle["close"]
+        e20_1h   = ema20_1h[-1]
+        e50_1h   = ema50_1h[-1]
 
-        if is_oversold and solid_bounce and rsi_hook_up:
-            signal = "BUY"
-            reversal_detail = f"🟢 Solid Green Reversal (+{green_body:.0f} pts) & RSI Hooked Up ({prev_rsi:.1f} ↗ {rsi:.1f})"
+        # 🔴 SHORT SIGNAL: 1D Bearish + 4H Bearish + 1H below 50 EMA + Pullback to 20 EMA + Solid Red Rejection
+        if trend_1d == -1 and trend_4h == -1:
+            if close_1h < e50_1h and high_1h >= e20_1h and close_1h < e20_1h:
+                body_pts = open_1h - close_1h
+                if close_1h < open_1h and body_pts >= MIN_REJECTION_BODY_PTS:
+                    signal = "SELL"
+                    reversal_detail = f"🔴 1D/4H Bearish Alignment + 1H 20 EMA Rejection (-{body_pts:.0f} pts Red Body)"
 
-        # SELL: Was in extreme overbought (current or prev candle RSI >= 75 & dist >= 1.2%),
-        # AND current candle has SOLID RED body (>= 25 pts) or strong Shooting Star wick,
-        # AND RSI has hooked downward (rsi <= prev_rsi - MIN_RSI_HOOK_DELTA)!
-        is_overbought = (rsi >= RSI_OVERBOUGHT or prev_rsi >= RSI_OVERBOUGHT) and (dist_pct >= EMA_STRETCH_PCT or prev_dist >= EMA_STRETCH_PCT)
-        red_body = curr_candle["open"] - curr_candle["close"]
-        upper_wick = curr_candle["high"] - max(curr_candle["open"], curr_candle["close"])
-        solid_rejection = (red_body >= MIN_REVERSAL_BODY_PTS) or (red_body > 0 and upper_wick >= 2 * red_body and upper_wick >= 30.0)
-        rsi_hook_down = (rsi <= prev_rsi - MIN_RSI_HOOK_DELTA)
-
-        if is_overbought and solid_rejection and rsi_hook_down:
-            signal = "SELL"
-            reversal_detail = f"🔴 Solid Red Rejection (-{red_body:.0f} pts) & RSI Hooked Down ({prev_rsi:.1f} ↘ {rsi:.1f})"
+        # 🟢 LONG SIGNAL: 1D Bullish + 4H Bullish + 1H above 50 EMA + Pullback to 20 EMA + Solid Green Bounce
+        elif trend_1d == 1 and trend_4h == 1:
+            if close_1h > e50_1h and low_1h <= e20_1h and close_1h > e20_1h:
+                body_pts = close_1h - open_1h
+                if close_1h > open_1h and body_pts >= MIN_REJECTION_BODY_PTS:
+                    signal = "BUY"
+                    reversal_detail = f"🟢 1D/4H Bullish Alignment + 1H 20 EMA Bounce (+{body_pts:.0f} pts Green Body)"
 
         if not signal:
             return
@@ -590,18 +606,18 @@ class CloudTradingBot:
         }
 
         send_telegram(
-            f"🚀 *A+ {signal} (REVERSAL CONFIRMED) ORDER EXECUTED!* 🦈\n\n"
+            f"🚀 *A+ {signal} (MTF TREND CONFIRMED) ORDER EXECUTED!* 🦈\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
             f"• *Side*: `{signal}` ({CONTRACT_QTY} SOL)\n"
-            f"• *Strategy*: 15m Elastic Reversion + Confirmation\n"
+            f"• *Strategy*: Triple-Screen MTF Trend-Rider (1D/4H ➡️ 1H Pullback)\n"
             f"• *Confirmation*: {reversal_detail}\n"
             f"• *Margin Used*: ~₹{margin_required:,.0f} INR (at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
             f"• *Stop Loss (SL)*: ₹{sl:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss) 🛑\n"
-            f"• *Target (TP)*: ₹{target:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Max Profit) 🎯\n"
+            f"• *Target (TP)*: ₹{target:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target) 🎯\n"
             f"• *Exchange TP/SL*: {tpsl_status_msg}\n"
-            f"• *15m RSI*: {rsi:.1f} (Stretch: {dist_pct:+.2f}% from EMA 20)\n\n"
-            f"📊 *Trades Today*: {self.daily_stats['trades_today']}/{MAX_TRADES_PER_DAY} (Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
+            f"• *1D Trend*: {t_1d_str} | *4H Trend*: {t_4h_str}\n\n"
+            f"📊 *Trades Today*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
             f"🛡️ *Wallet Backup*: ~₹800+ safe in reserve!"
         )
 
