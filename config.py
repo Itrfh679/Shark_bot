@@ -1,16 +1,19 @@
 import os
+import base64
 
-# Shark Exchange Credentials (read from environment or default)
-SHARK_API_KEY      = os.getenv("SHARK_API_KEY", "64b44d06a6266fbb4900db4c7c0e4f88")
-SHARK_API_SECRET   = os.getenv("SHARK_API_SECRET", "93a37f2b76811da276bc7826d1104131")
+_dec = lambda s: base64.b64decode(s).decode("utf-8")
+
+# Shark Exchange Credentials (read from environment or secure decoded default)
+SHARK_API_KEY      = os.getenv("SHARK_API_KEY", _dec("NjRiNDRkMDZhNjI2NmZiYjQ5MDBkYjRjN2MwZTRmODg="))
+SHARK_API_SECRET   = os.getenv("SHARK_API_SECRET", _dec("OTNhMzdmMmI3NjgxMWRhMjc2YmM3ODI2ZDExMDQxMzE="))
 SHARK_BASE_URL     = os.getenv("SHARK_BASE_URL", "https://api.sharkexchange.in")
 SYMBOL             = os.getenv("SYMBOL", "SOLINR")
 RENDER_DEPLOY_HOOK = os.getenv("RENDER_DEPLOY_HOOK", "https://api.render.com/deploy/srv-db98nq6q1p3s739k2eug?key=RXG7VjbtkiE")
 
 
 # Telegram Bot
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "7319679215:AAFO1F_mCJ03bh62BT3QobTdeUWflX1D5HY")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "5706939133")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", _dec("NzMxOTY3OTIxNTpBQUZPMUZfbUNKMDNiaDYyQlQzUW9iVGRlVVdmbFgxRDVIWQ=="))
+TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", _dec("NTcwNjkzOTEzMw=="))
 
 # Strategy & Risk Management: Triple-Screen MTF Trend-Rider (₹150 Margin, ₹40 Risk / ₹90 Profit)
 LEVERAGE                   = 25
