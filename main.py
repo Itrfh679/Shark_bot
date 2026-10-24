@@ -24,9 +24,12 @@ from config import (
     MAX_LOSSES_PER_DAY, MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
     RESOLUTION, EMA_PERIOD, RSI_PERIOD, RSI_OVERSOLD, RSI_OVERBOUGHT,
     EMA_STRETCH_PCT, REQUIRE_REVERSAL_CONFIRM,
-    MIN_REVERSAL_BODY_PTS, MIN_RSI_HOOK_DELTA
+    MIN_REVERSAL_BODY_PTS, MIN_RSI_HOOK_DELTA,
+    COINDCX_API_KEY, COINDCX_API_SECRET, COINDCX_MAX_MARGIN_INR, COINDCX_DEFAULT_LEVERAGE
 )
 from shark_api import SharkClient
+from coindcx_client import CoinDCXClient
+from signal_parser import parse_signal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -75,6 +78,7 @@ def calc_rsi(closes: list, period: int = 14) -> float:
 class CloudTradingBot:
     def __init__(self):
         self.client = SharkClient()
+        self.coindcx = CoinDCXClient(COINDCX_API_KEY, COINDCX_API_SECRET)
         self.is_running = True
         self.public_ip = "Unknown"
         self.active_trade = None
@@ -346,16 +350,86 @@ class CloudTradingBot:
             msg = "✅ *All Positions Closed Immediately!*" if success else "⚠️ *Close Request Sent!*"
             send_telegram(msg)
 
+        elif cmd_lower in ["/cdcx", "/cdcx_balance", "cdcx", "cdcx balance"]:
+            balances = self.coindcx.get_balances()
+            active = [b for b in balances if float(b.get('balance', 0)) > 0 or float(b.get('locked_balance', 0)) > 0]
+            if active:
+                bal_text = "\n".join([f"• *{b['currency']}*: `{float(b['balance']):,.4f}`" for b in active[:12]])
+                send_telegram(f"🟡 *CoinDCX Active Balances:*\n\n{bal_text}")
+            else:
+                send_telegram("🟡 *CoinDCX Wallet*: No active balances found.")
+
+        elif cmd_lower in ["/cdcx_pos", "/cdcx_positions", "cdcx pos", "cdcx positions"]:
+            pos = self.coindcx.get_active_positions()
+            if pos:
+                pos_text = "\n".join([f"• *{p['pair']}*: `{p.get('active_pos')}` (Avg: ${p.get('avg_price')})" for p in pos])
+                send_telegram(f"📊 *CoinDCX Active Futures Positions:*\n\n{pos_text}")
+            else:
+                send_telegram("📊 *CoinDCX Futures*: No open positions.")
+
         elif cmd_lower in ["/help", "help"]:
             send_telegram(
                 "🤖 *Cloud Trading Bot Commands:*\n\n"
+                "🦈 *Shark Exchange:*\n"
                 "• `/status` - Live SOL price & strategy state\n"
                 "• `/balance` - Shark Exchange wallet balance\n"
                 "• `/start` - Resume 24x7 cloud trading\n"
                 "• `/stop` - Pause bot trading\n"
-                "• `/close` - Emergency close active position\n"
+                "• `/close` - Emergency close active position\n\n"
+                "🟡 *CoinDCX Futures:*\n"
+                "• `/cdcx` - Live CoinDCX balances\n"
+                "• `/cdcx_pos` - Active CoinDCX positions\n"
+                "• *Signal Auto-Execution*: Telegram me koi bhi Expert Pick forward/paste karein (e.g. `ETH Short 15x...`), bot use CoinDCX par ₹150 margin se execute kar dega!\n\n"
                 "• `/help` - Show this menu"
             )
+
+        else:
+            # Check if this message is a CoinDCX Expert Pick signal!
+            sig = parse_signal(cmd)
+            if sig:
+                send_telegram(f"⚡ *CoinDCX Signal Recognized: {sig['coin']} ({sig['side'].upper()})!* Executing...")
+                self.execute_coindcx_signal(sig)
+
+    def execute_coindcx_signal(self, sig: dict) -> dict:
+        pair = sig["pair"]
+        side = sig["side"]
+        leverage = sig.get("leverage") or COINDCX_DEFAULT_LEVERAGE
+        entry_price = sig.get("entry_avg", 0.0)
+        tp = sig.get("take_profit")
+        sl = sig.get("stop_loss")
+
+        qty = self.coindcx.calculate_quantity(pair, entry_price, margin_inr=COINDCX_MAX_MARGIN_INR, leverage=leverage)
+        if qty <= 0:
+            send_telegram(f"⚠️ *Order Error*: Calculated quantity is 0 for {pair}")
+            return {"success": False}
+
+        approx_val_inr = (qty * entry_price) * self.coindcx.usd_inr_rate
+        approx_margin = approx_val_inr / leverage
+
+        res = self.coindcx.place_futures_order(
+            pair=pair,
+            side=side,
+            order_type="market_order",
+            quantity=qty,
+            leverage=leverage
+        )
+
+        if res.get("success"):
+            send_telegram(
+                f"🚀 *COINDCX EXPERT PICK EXECUTED!* 🟡\n\n"
+                f"• *Coin*: `{sig['coin']}` ({pair})\n"
+                f"• *Side*: `{side.upper()}` ({leverage}×)\n"
+                f"• *Quantity*: `{qty}`\n"
+                f"• *Entry Price*: `${entry_price:,.2f}` (~₹{entry_price * self.coindcx.usd_inr_rate:,.0f})\n"
+                f"• *Margin Used*: `₹{approx_margin:,.1f} INR` (Strictly under ₹160!)\n"
+                f"• *Take Profit (TP)*: `${tp:,.2f}` 🎯\n"
+                f"• *Stop Loss (SL)*: `${sl:,.2f}` 🛑\n\n"
+                f"✅ CoinDCX Futures account me trade 100% active ho gaya hai!"
+            )
+        else:
+            err = res.get("error", "Unknown error")
+            send_telegram(f"⚠️ *CoinDCX Order Failed:*\n• *Pair*: `{pair}`\n• *Reason*: `{err}`")
+        return res
 
     # ─────────────────────────────────────────────────────────
     #  24x7 STRATEGY ENGINE (THREAD 2)
@@ -750,10 +824,83 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
                 )
             return
 
+        if self.path == "/cdcx-balance":
+            coindcx = CoinDCXClient(COINDCX_API_KEY, COINDCX_API_SECRET)
+            balances = coindcx.get_balances()
+            active = [b for b in balances if float(b.get('balance', 0)) > 0 or float(b.get('locked_balance', 0)) > 0]
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(active).encode())
+            return
+
+        if self.path == "/cdcx-pos":
+            coindcx = CoinDCXClient(COINDCX_API_KEY, COINDCX_API_SECRET)
+            pos = coindcx.get_futures_positions()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(pos).encode())
+            return
+
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Shark Exchange Cloud Trading Bot is Active 24x7 OK\n")
+        self.wfile.write(b"Shark & CoinDCX Dual Cloud Trading Bot is Active 24x7 OK\n")
+
+    def do_POST(self):
+        if self.path == "/webhook/signal":
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length).decode("utf-8")
+            signal_text = ""
+            try:
+                data = json.loads(post_data)
+                signal_text = data.get("text") or data.get("message") or post_data
+            except Exception:
+                signal_text = post_data
+
+            log.info(f"Received webhook signal on Render: {signal_text}")
+            sig = parse_signal(signal_text)
+            if sig:
+                coindcx = CoinDCXClient(COINDCX_API_KEY, COINDCX_API_SECRET)
+                pair = sig["pair"]
+                side = sig["side"]
+                leverage = sig.get("leverage") or COINDCX_DEFAULT_LEVERAGE
+                entry_price = sig.get("entry_avg", 0.0)
+                tp = sig.get("take_profit")
+                sl = sig.get("stop_loss")
+                qty = coindcx.calculate_quantity(pair, entry_price, margin_inr=COINDCX_MAX_MARGIN_INR, leverage=leverage)
+                res = coindcx.place_futures_order(pair=pair, side=side, order_type="market_order", quantity=qty, leverage=leverage)
+
+                approx_val_inr = (qty * entry_price) * coindcx.usd_inr_rate
+                approx_margin = approx_val_inr / leverage
+                if res.get("success"):
+                    send_telegram(
+                        f"🚀 *COINDCX WEBHOOK EXPERT PICK EXECUTED!* 🟡\n\n"
+                        f"• *Coin*: `{sig['coin']}` ({pair})\n"
+                        f"• *Side*: `{side.upper()}` ({leverage}×)\n"
+                        f"• *Quantity*: `{qty}`\n"
+                        f"• *Margin Used*: `₹{approx_margin:,.1f} INR`\n"
+                        f"• *TP*: `${tp:,.2f}` | *SL*: `${sl:,.2f}`\n\n"
+                        f"✅ CoinDCX account me trade 100% active ho gaya hai!"
+                    )
+                else:
+                    err = res.get("error", "Unknown error")
+                    send_telegram(f"⚠️ *CoinDCX Order Failed:*\n• *Pair*: `{pair}`\n• *Reason*: `{err}`")
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"received": True, "parsed": sig, "result": res}).encode())
+            else:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Failed to parse signal text", "raw": signal_text}).encode())
+            return
+
+        self.send_response(404)
+        self.end_headers()
 
     def log_message(self, format, *args):
         pass
