@@ -319,31 +319,58 @@ class CloudTradingBot:
             c15m = self.client.get_candles(RESOLUTION_15M, 25)
             curr_price = c15m[-1]["close"] if c15m else (c1h[-1]["close"] if c1h else 0.0)
 
-            t_1d_str = "BULLISH 🟢" if (c1d and len(c1d) >= 20 and c1d[-1]["close"] > calc_ema([c["close"] for c in c1d], 20)[-1]) else "BEARISH 🔴"
-            t_4h_str = "BULLISH 🟢" if (c4h and len(c4h) >= 20 and c4h[-1]["close"] > calc_ema([c["close"] for c in c4h], 20)[-1]) else "BEARISH 🔴"
-            
-            # 15m Momentum Check
+            # EMAs
+            ema20_1d = calc_ema([c["close"] for c in c1d], 20)[-1] if (c1d and len(c1d) >= 20) else curr_price
+            ema20_4h = calc_ema([c["close"] for c in c4h], 20)[-1] if (c4h and len(c4h) >= 20) else curr_price
+            ema20_1h = calc_ema([c["close"] for c in c1h], 20)[-1] if (c1h and len(c1h) >= 20) else curr_price
+            ema50_1h = calc_ema([c["close"] for c in c1h], 50)[-1] if (c1h and len(c1h) >= 50) else ema20_1h
             ema20_15m = calc_ema([c["close"] for c in c15m], 20)[-1] if (c15m and len(c15m) >= 20) else curr_price
-            is_15m_pump = c15m[-1]["close"] > ema20_15m or (c15m[-1]["close"] > c15m[-1]["open"]) if c15m else False
-            t_15m_str = "PUMPING (Green) 🟢 [Short Blocked 🛑]" if is_15m_pump else "BEARISH (Red) 🔴 [Short Allowed ✅]"
 
+            t_1d_str = "BULLISH 🟢" if curr_price > ema20_1d else "BEARISH 🔴"
+            t_4h_str = "BULLISH 🟢" if curr_price > ema20_4h else "BEARISH 🔴"
             bias_str = "SHORT ONLY 📉" if ("BEARISH" in t_1d_str and "BEARISH" in t_4h_str) else ("LONG ONLY 📈" if ("BULLISH" in t_1d_str and "BULLISH" in t_4h_str) else "NEUTRAL / CHOP ⏸️")
 
-            if self.active_trade:
-                pos_text = f"{self.active_trade['side']} (Entry: ₹{self.active_trade['entry']:,.0f}, SL: ₹{self.active_trade['sl']:,.0f}, TP: ₹{self.active_trade['target']:,.0f})"
+            # 15m Momentum Check
+            is_15m_green = c15m[-1]["close"] > c15m[-1]["open"] if c15m else False
+            is_15m_above_ema = c15m[-1]["close"] > ema20_15m if c15m else False
+            is_15m_pumping = is_15m_green or is_15m_above_ema
+
+            if "SHORT" in bias_str:
+                t_15m_str = "PUMPING (Green) 🟢 [Short Blocked 🛑]" if is_15m_pumping else "BEARISH (Red) 🔴 [Short Allowed ✅]"
+                action_text = "15m pump chal raha hai (waiting for Red candle)" if is_15m_pumping else "Waiting for 1H Pullback Rejection (-20 pts Red)"
+            elif "LONG" in bias_str:
+                is_15m_dumping = (not is_15m_green) or (not is_15m_above_ema)
+                t_15m_str = "DUMPING (Red) 🔴 [Long Blocked 🛑]" if is_15m_dumping else "BULLISH (Green) 🟢 [Long Allowed ✅]"
+                action_text = "15m dump chal raha hai (waiting for Green candle)" if is_15m_dumping else "Waiting for 1H Pullback Bounce (+20 pts Green)"
             else:
-                pos_text = f"No Open Trade (Waiting 1H Pullback + 15m Confirmation in {bias_str})"
+                t_15m_str = "NEUTRAL / CHOP ⏸️"
+                action_text = "1D aur 4H trend me conflict hai (No trades)"
+
+            dist_1h = curr_price - ema20_1h
+            dist_1h_str = f"+₹{dist_1h:,.0f}" if dist_1h >= 0 else f"-₹{abs(dist_1h):,.0f}"
+
+            if self.active_trade:
+                pos_text = f"🚀 ACTIVE {self.active_trade['side']} (Entry: ₹{self.active_trade['entry']:,.0f} | SL: ₹{self.active_trade['sl']:,.0f} | TP: ₹{self.active_trade['target']:,.0f})"
+            else:
+                pos_text = f"🔍 Scanning ({action_text})"
             state = "🟢 RUNNING" if self.is_running else "⏸️ PAUSED"
+
             send_telegram(
-                f"📊 *Shark MTF Trend Bot Status* ☁️\n\n"
-                f"• *Status*: {state}\n"
-                f"• *Current SOL Price*: ₹{curr_price:,.0f} INR\n"
-                f"• *1-Day Macro Trend*: {t_1d_str}\n"
-                f"• *4-Hour Confirmation*: {t_4h_str}\n"
-                f"• *15-Minute Shield*: {t_15m_str}\n"
-                f"• *Strategy Mode*: *{bias_str}*\n"
-                f"• *Active Position*: {pos_text}\n"
-                f"• *Trades Today*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
+                f"📊 *SHARK BOT FULL RADAR & STATUS* ☁️\n\n"
+                f"💰 *Pair*: `{SYMBOL}` | *SOL Price*: ₹{curr_price:,.0f} INR\n"
+                f"• *Bot State*: {state}\n\n"
+                f"📊 *4-Timeframe Screens Live:*\n"
+                f"1️⃣ *1-Day Macro*: {t_1d_str} (EMA 20: ₹{ema20_1d:,.0f})\n"
+                f"2️⃣ *4-Hour Swing*: {t_4h_str} (EMA 20: ₹{ema20_4h:,.0f})\n"
+                f"3️⃣ *1-Hour Pullback*: 20 EMA: ₹{ema20_1h:,.0f} ({dist_1h_str}) | 50 EMA: ₹{ema50_1h:,.0f}\n"
+                f"4️⃣ *15-Min Shield*: {t_15m_str} (EMA 20: ₹{ema20_15m:,.0f})\n\n"
+                f"🎯 *Strategy Bias*: *{bias_str}*\n"
+                f"• *Status*: {pos_text}\n\n"
+                f"🛡️ *Risk & Capital Control:*\n"
+                f"• *Trade Size*: {CONTRACT_QTY} SOL (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
+                f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} | *Target*: +₹{MAX_PROFIT_PER_TRADE_INR:.0f} (1:2.25 RR)\n"
+                f"• *Trades Today*: {self.daily_stats['trades_today']}/20 (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
+                f"• *Circuit Breaker*: {MAX_LOSSES_PER_DAY - self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY} Losses Remaining\n"
                 f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*\n"
                 f"• *Uptime*: 24×7 Cloud Active (No phone needed)"
             )
@@ -453,17 +480,48 @@ class CloudTradingBot:
         now = time.time()
         if now - self.last_heartbeat_time >= 3600:
             self.last_heartbeat_time = now
-            pos_str = f"{self.active_trade['side']} (₹{self.active_trade['entry']:,.0f})" if self.active_trade else f"Scanning ({bias_str})"
+
+            # 15m Momentum & Shield Status
+            is_15m_green = curr_15m["close"] > curr_15m["open"]
+            is_15m_above_ema = curr_15m["close"] > ema20_15m[-1]
+            is_15m_pumping = is_15m_green or is_15m_above_ema
+
+            if "SHORT" in bias_str:
+                shield_status = "PUMPING (Green) 🟢 [Short Blocked 🛑]" if is_15m_pumping else "BEARISH (Red) 🔴 [Short Allowed ✅]"
+                action_text = "15m pump chal raha hai (waiting for Red candle)" if is_15m_pumping else "Waiting for 1H Pullback Rejection (-20 pts Red)"
+            elif "LONG" in bias_str:
+                is_15m_dumping = (not is_15m_green) or (not is_15m_above_ema)
+                shield_status = "DUMPING (Red) 🔴 [Long Blocked 🛑]" if is_15m_dumping else "BULLISH (Green) 🟢 [Long Allowed ✅]"
+                action_text = "15m dump chal raha hai (waiting for Green candle)" if is_15m_dumping else "Waiting for 1H Pullback Bounce (+20 pts Green)"
+            else:
+                shield_status = "NEUTRAL / CHOP ⏸️"
+                action_text = "1D aur 4H trend me conflict hai (No trades)"
+
+            dist_1h = sol_price - ema20_1h[-1]
+            dist_1h_str = f"+₹{dist_1h:,.0f}" if dist_1h >= 0 else f"-₹{abs(dist_1h):,.0f}"
+
+            if self.active_trade:
+                pos_str = f"🚀 ACTIVE {self.active_trade['side']} (Entry: ₹{self.active_trade['entry']:,.0f} | SL: ₹{self.active_trade['sl']:,.0f} | TP: ₹{self.active_trade['target']:,.0f})"
+            else:
+                pos_str = f"🔍 Scanning ({action_text})"
+
             send_telegram(
-                f"💓 *Shark MTF Trend Bot Heartbeat* 🟢\n\n"
-                f"• *SOL Price*: ₹{sol_price:,.0f} INR\n"
-                f"• *1-Day Trend*: {t_1d_str} (EMA 20: ₹{ema20_1d[-1]:,.0f})\n"
-                f"• *4-Hour Trend*: {t_4h_str} (EMA 20: ₹{ema20_4h[-1]:,.0f})\n"
-                f"• *Strategy Mode*: *{bias_str}*\n"
-                f"• *Status*: {pos_str}\n"
-                f"• *Trades Today*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
+                f"💓 *SHARK BOT FULL RADAR & HEARTBEAT* 🟢\n\n"
+                f"💰 *Pair*: `{SYMBOL}` | *SOL Price*: ₹{sol_price:,.0f} INR\n\n"
+                f"📊 *4-Timeframe Screens Live:*\n"
+                f"1️⃣ *1-Day Macro*: {t_1d_str} (EMA 20: ₹{ema20_1d[-1]:,.0f})\n"
+                f"2️⃣ *4-Hour Swing*: {t_4h_str} (EMA 20: ₹{ema20_4h[-1]:,.0f})\n"
+                f"3️⃣ *1-Hour Pullback*: 20 EMA: ₹{ema20_1h[-1]:,.0f} ({dist_1h_str}) | 50 EMA: ₹{ema50_1h[-1]:,.0f}\n"
+                f"4️⃣ *15-Min Shield*: {shield_status} (EMA 20: ₹{ema20_15m[-1]:,.0f})\n\n"
+                f"🎯 *Strategy Mode*: *{bias_str}*\n"
+                f"• *Status*: {pos_str}\n\n"
+                f"🛡️ *Risk & Capital Control:*\n"
+                f"• *Trade Size*: {CONTRACT_QTY} SOL (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
+                f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} | *Target*: +₹{MAX_PROFIT_PER_TRADE_INR:.0f} (1:2.25 RR)\n"
+                f"• *Daily Trades*: {self.daily_stats['trades_today']}/20 (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
+                f"• *Circuit Breaker*: {MAX_LOSSES_PER_DAY - self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY} Losses Remaining\n"
                 f"• *Today P&L*: *₹{self.daily_stats['pnl_inr_today']:+.1f} INR*\n"
-                f"• *Cloud Host*: Online 24×7 🛡️"
+                f"• *Cloud Host*: Online 24×7 Active ☁️"
             )
 
         # Active trade exit check
