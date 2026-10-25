@@ -80,7 +80,7 @@ class SharkClient:
         try:
             url = f"{self.base_url}/v1/market/klines"
             payload = {"pair": self.symbol, "interval": resolution, "limit": limit}
-            r = self.session.post(url, json=payload, timeout=8)
+            r = self.session.post(url, json=payload, timeout=15)
             if r.status_code == 201:
                 raw = r.json()
                 candles = [
@@ -97,33 +97,7 @@ class SharkClient:
                 candles.sort(key=lambda x: x["time"])
                 return candles
         except Exception as e:
-            log.warning(f"Shark candles error: {e}")
-
-        # Fallback to Delta INR conversion if Shark market endpoint is ever degraded
-        try:
-            end = int(time.time())
-            res_secs = 900 if resolution == "15m" else 300
-            start = end - (limit * res_secs)
-            url_delta = "https://api.india.delta.exchange/v2/history/candles"
-            r_d = self.session.get(url_delta, params={"resolution": resolution, "symbol": "BTCUSD", "start": start, "end": end}, timeout=8)
-            if r_d.status_code == 200:
-                raw_d = r_d.json().get("result", [])
-                candles = [
-                    {
-                        "time": c["time"],
-                        "open": float(c["open"]) * 88.0,
-                        "high": float(c["high"]) * 88.0,
-                        "low": float(c["low"]) * 88.0,
-                        "close": float(c["close"]) * 88.0,
-                        "volume": float(c.get("volume", 0.0) or 0.0),
-                    }
-                    for c in raw_d
-                ]
-                candles.sort(key=lambda x: x["time"])
-                return candles
-        except Exception as e2:
-            log.error(f"Fallback candle fetch error: {e2}")
-
+            log.warning(f"Shark candles error ({resolution}): {e}")
         return []
 
     # ─────────────────────────────────────────────────────────

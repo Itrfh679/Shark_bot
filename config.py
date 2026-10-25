@@ -29,7 +29,8 @@ COOLDOWN_LOSS_MINS         = 30         # 30-min patience pause after any loss
 RESOLUTION_1D              = "1d"       # Screen 1: Daily Macro Trend
 RESOLUTION_4H              = "4h"       # Screen 2: 4-Hour Trend Confirmation
 RESOLUTION_1H              = "1h"       # Screen 3: 1-Hour Pullback Entry
-EMA_TREND_PERIOD           = 20         # 20 EMA for 1D, 4H, and 1H
+RESOLUTION_15M             = "15m"      # Screen 4: 15-Minute Momentum Filter (Blocks counter-trend pump/dump)
+EMA_TREND_PERIOD           = 20         # 20 EMA for 1D, 4H, 1H, and 15m
 EMA_FILTER_PERIOD          = 50         # 50 EMA for 1H alignment
 MIN_REJECTION_BODY_PTS     = 20.0       # Minimum 20 pts solid candle body for pullback rejection
 

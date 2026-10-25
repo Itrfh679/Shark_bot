@@ -22,7 +22,7 @@ from config import (
     LEVERAGE, CONTRACT_QTY, MARGIN_REQUIRED,
     MAX_LOSS_PER_TRADE_INR, MAX_PROFIT_PER_TRADE_INR,
     MAX_LOSSES_PER_DAY, MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
-    RESOLUTION_1D, RESOLUTION_4H, RESOLUTION_1H,
+    RESOLUTION_1D, RESOLUTION_4H, RESOLUTION_1H, RESOLUTION_15M,
     EMA_TREND_PERIOD, EMA_FILTER_PERIOD, MIN_REJECTION_BODY_PTS
 )
 from shark_api import SharkClient
@@ -45,6 +45,8 @@ def send_telegram(text: str):
         log.error(f"Telegram error: {e}")
 
 def calc_ema(values: list, period: int) -> list:
+    if not values:
+        return []
     if len(values) < period:
         return [values[-1]] * len(values)
     k = 2.0 / (period + 1)
@@ -206,7 +208,7 @@ class CloudTradingBot:
                     qty = trade.get("qty", CONTRACT_QTY)
 
                     # Fetch latest 15m candle to determine exit price
-                    c15m = self.client.get_candles(RESOLUTION, 5)
+                    c15m = self.client.get_candles(RESOLUTION_15M, 5)
                     last_c = c15m[-1] if c15m else {"close": entry, "high": entry, "low": entry}
                     exit_price = last_c.get("close", entry)
 
@@ -314,16 +316,23 @@ class CloudTradingBot:
             c1d = self.client.get_candles(RESOLUTION_1D, 25)
             c4h = self.client.get_candles(RESOLUTION_4H, 25)
             c1h = self.client.get_candles(RESOLUTION_1H, 25)
-            curr_price = c1h[-1]["close"] if c1h else 0.0
+            c15m = self.client.get_candles(RESOLUTION_15M, 25)
+            curr_price = c15m[-1]["close"] if c15m else (c1h[-1]["close"] if c1h else 0.0)
 
             t_1d_str = "BULLISH 🟢" if (c1d and len(c1d) >= 20 and c1d[-1]["close"] > calc_ema([c["close"] for c in c1d], 20)[-1]) else "BEARISH 🔴"
             t_4h_str = "BULLISH 🟢" if (c4h and len(c4h) >= 20 and c4h[-1]["close"] > calc_ema([c["close"] for c in c4h], 20)[-1]) else "BEARISH 🔴"
+            
+            # 15m Momentum Check
+            ema20_15m = calc_ema([c["close"] for c in c15m], 20)[-1] if (c15m and len(c15m) >= 20) else curr_price
+            is_15m_pump = c15m[-1]["close"] > ema20_15m or (c15m[-1]["close"] > c15m[-1]["open"]) if c15m else False
+            t_15m_str = "PUMPING (Green) 🟢 [Short Blocked 🛑]" if is_15m_pump else "BEARISH (Red) 🔴 [Short Allowed ✅]"
+
             bias_str = "SHORT ONLY 📉" if ("BEARISH" in t_1d_str and "BEARISH" in t_4h_str) else ("LONG ONLY 📈" if ("BULLISH" in t_1d_str and "BULLISH" in t_4h_str) else "NEUTRAL / CHOP ⏸️")
 
             if self.active_trade:
                 pos_text = f"{self.active_trade['side']} (Entry: ₹{self.active_trade['entry']:,.0f}, SL: ₹{self.active_trade['sl']:,.0f}, TP: ₹{self.active_trade['target']:,.0f})"
             else:
-                pos_text = f"No Open Trade (Waiting 1H Pullback in {bias_str})"
+                pos_text = f"No Open Trade (Waiting 1H Pullback + 15m Confirmation in {bias_str})"
             state = "🟢 RUNNING" if self.is_running else "⏸️ PAUSED"
             send_telegram(
                 f"📊 *Shark MTF Trend Bot Status* ☁️\n\n"
@@ -331,6 +340,7 @@ class CloudTradingBot:
                 f"• *Current SOL Price*: ₹{curr_price:,.0f} INR\n"
                 f"• *1-Day Macro Trend*: {t_1d_str}\n"
                 f"• *4-Hour Confirmation*: {t_4h_str}\n"
+                f"• *15-Minute Shield*: {t_15m_str}\n"
                 f"• *Strategy Mode*: *{bias_str}*\n"
                 f"• *Active Position*: {pos_text}\n"
                 f"• *Trades Today*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats.get('losses_today', 0)}/{MAX_LOSSES_PER_DAY})\n"
@@ -373,13 +383,14 @@ class CloudTradingBot:
         self.detect_public_ip()
 
         send_telegram(
-            f"🦈 *SHARK MTF TREND-RIDER BOT ONLINE!* ☁️\n\n"
+            f"🦈 *SHARK QUAD-SCREEN MTF TREND BOT ONLINE!* ☁️\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Strategy*: Triple-Screen MTF Trend-Rider (1D ➡️ 4H ➡️ 1H Pullback) 🛡️\n"
+            f"• *Strategy*: Quad-Screen MTF Trend-Rider (1D ➡️ 4H ➡️ 1H ➡️ 15m Shield) 🛡️\n"
+            f"• *Anti-Pump Shield*: 15m Green pump chalte waqt Short 100% Blocked 🛑\n"
+            f"• *Anti-Dump Shield*: 15m Red dump chalte waqt Long 100% Blocked 🛑\n"
             f"• *Trade Size*: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
             f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
             f"• *Take Profit*: Exact +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target (1:2.25 RR) 🎯\n"
-            f"• *Rejection Filter*: Solid Body (≥{MIN_REJECTION_BODY_PTS:.0f} pts) from 20 EMA 🎯\n"
             f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Unlimited Wins Mode 🔒\n"
             f"• *Phone Status*: You can close your phone/Termux now! 📱💤\n\n"
             f"👉 Send `/status` or `/balance` anytime to inspect!"
@@ -401,12 +412,13 @@ class CloudTradingBot:
         # Sync open positions with exchange
         self.sync_active_trade_from_exchange()
 
-        # Fetch Multi-Timeframe candles: 1D, 4H, and 1H
+        # Fetch Multi-Timeframe candles: 1D, 4H, 1H, and 15m
         c1d = self.client.get_candles(RESOLUTION_1D, 30)
         c4h = self.client.get_candles(RESOLUTION_4H, 30)
         c1h = self.client.get_candles(RESOLUTION_1H, 60)
+        c15m = self.client.get_candles(RESOLUTION_15M, 30)
 
-        if len(c1d) < 20 or len(c4h) < 20 or len(c1h) < 50:
+        if len(c1d) < 20 or len(c4h) < 20 or len(c1h) < 50 or len(c15m) < 20:
             return
 
         # 1-Day Trend (20 EMA)
@@ -423,6 +435,11 @@ class CloudTradingBot:
         closes_1h = [c["close"] for c in c1h]
         ema20_1h  = calc_ema(closes_1h, EMA_TREND_PERIOD)
         ema50_1h  = calc_ema(closes_1h, EMA_FILTER_PERIOD)
+
+        # 15-Minute Momentum & Shield (20 EMA)
+        closes_15m = [c["close"] for c in c15m]
+        ema20_15m  = calc_ema(closes_15m, EMA_TREND_PERIOD)
+        curr_15m   = c15m[-1]
 
         curr_candle = c1h[-1]
         prev_candle = c1h[-2] if len(c1h) >= 2 else curr_candle
@@ -537,20 +554,34 @@ class CloudTradingBot:
         e50_1h   = ema50_1h[-1]
 
         # 🔴 SHORT SIGNAL: 1D Bearish + 4H Bearish + 1H below 50 EMA + Pullback to 20 EMA + Solid Red Rejection
+        # 🛡️ 15-MINUTE ANTI-PUMP SHIELD: Short is strictly blocked if 15m is actively pumping (Green candle or above 15m 20 EMA)
         if trend_1d == -1 and trend_4h == -1:
             if close_1h < e50_1h and high_1h >= e20_1h and close_1h < e20_1h:
                 body_pts = open_1h - close_1h
                 if close_1h < open_1h and body_pts >= MIN_REJECTION_BODY_PTS:
-                    signal = "SELL"
-                    reversal_detail = f"🔴 1D/4H Bearish Alignment + 1H 20 EMA Rejection (-{body_pts:.0f} pts Red Body)"
+                    is_15m_red = curr_15m["close"] < curr_15m["open"]
+                    is_15m_under_ema = curr_15m["close"] <= ema20_15m[-1]
+                    if is_15m_red and is_15m_under_ema:
+                        signal = "SELL"
+                        reversal_detail = f"🔴 1D/4H Bearish + 1H 20 EMA Rejection (-{body_pts:.0f} pts) + 15m Confirmed Red (Shield Clear) 🛡️"
+                    else:
+                        pump_reason = "15m candle is Green" if not is_15m_red else "Price above 15m 20 EMA"
+                        log.info(f"SHORT BLOCKED by 15m Anti-Pump Shield ({pump_reason})")
 
         # 🟢 LONG SIGNAL: 1D Bullish + 4H Bullish + 1H above 50 EMA + Pullback to 20 EMA + Solid Green Bounce
+        # 🛡️ 15-MINUTE ANTI-DUMP SHIELD: Long is strictly blocked if 15m is actively dumping (Red candle or below 15m 20 EMA)
         elif trend_1d == 1 and trend_4h == 1:
             if close_1h > e50_1h and low_1h <= e20_1h and close_1h > e20_1h:
                 body_pts = close_1h - open_1h
                 if close_1h > open_1h and body_pts >= MIN_REJECTION_BODY_PTS:
-                    signal = "BUY"
-                    reversal_detail = f"🟢 1D/4H Bullish Alignment + 1H 20 EMA Bounce (+{body_pts:.0f} pts Green Body)"
+                    is_15m_green = curr_15m["close"] > curr_15m["open"]
+                    is_15m_above_ema = curr_15m["close"] >= ema20_15m[-1]
+                    if is_15m_green and is_15m_above_ema:
+                        signal = "BUY"
+                        reversal_detail = f"🟢 1D/4H Bullish + 1H 20 EMA Bounce (+{body_pts:.0f} pts) + 15m Confirmed Green (Shield Clear) 🛡️"
+                    else:
+                        dump_reason = "15m candle is Red" if not is_15m_green else "Price below 15m 20 EMA"
+                        log.info(f"LONG BLOCKED by 15m Anti-Dump Shield ({dump_reason})")
 
         if not signal:
             return
@@ -609,14 +640,14 @@ class CloudTradingBot:
             f"🚀 *A+ {signal} (MTF TREND CONFIRMED) ORDER EXECUTED!* 🦈\n\n"
             f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
             f"• *Side*: `{signal}` ({CONTRACT_QTY} SOL)\n"
-            f"• *Strategy*: Triple-Screen MTF Trend-Rider (1D/4H ➡️ 1H Pullback)\n"
+            f"• *Strategy*: Quad-Screen MTF Trend-Rider (1D/4H ➡️ 1H ➡️ 15m Shield)\n"
             f"• *Confirmation*: {reversal_detail}\n"
             f"• *Margin Used*: ~₹{margin_required:,.0f} INR (at {LEVERAGE}×)\n"
             f"• *Entry Price*: ₹{entry:,.0f} INR\n"
             f"• *Stop Loss (SL)*: ₹{sl:,.0f} (-₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss) 🛑\n"
             f"• *Target (TP)*: ₹{target:,.0f} (+₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target) 🎯\n"
             f"• *Exchange TP/SL*: {tpsl_status_msg}\n"
-            f"• *1D Trend*: {t_1d_str} | *4H Trend*: {t_4h_str}\n\n"
+            f"• *1D*: {t_1d_str} | *4H*: {t_4h_str} | *15m*: Shield Confirmed 🛡️\n\n"
             f"📊 *Trades Today*: {self.daily_stats['trades_today']} (Wins: {self.daily_stats.get('wins_today', 0)}, Losses: {self.daily_stats['losses_today']}/{MAX_LOSSES_PER_DAY})\n"
             f"🛡️ *Wallet Backup*: ~₹800+ safe in reserve!"
         )
