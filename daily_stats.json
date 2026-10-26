@@ -1,8 +1,8 @@
 {
-  "date": "2026-10-19",
-  "trades_today": 3,
+  "date": "2026-10-26",
+  "trades_today": 0,
   "wins_today": 0,
-  "losses_today": 3,
-  "pnl_inr_today": -49.6,
-  "total_month_pnl_inr": -49.6
+  "losses_today": 0,
+  "pnl_inr_today": 0.0,
+  "total_month_pnl_inr": 0.0
 }

@@ -82,6 +82,7 @@ class CloudTradingBot:
         self.last_candle_time = 0
         self.last_loss_time = 0
         self.last_heartbeat_time = 0
+        self.missing_pos_count = 0
         self.stats_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "daily_stats.json")
         self.daily_stats = self._load_daily_stats()
 
@@ -136,17 +137,23 @@ class CloudTradingBot:
         If an open position exists without exchange TP/SL orders, automatically attaches them.
         """
         try:
-            positions = self.client.get_open_positions()
-            pos_list = positions if isinstance(positions, list) else (positions.get("data") or positions.get("result") or [])
             matched_pos = None
-            if isinstance(pos_list, list):
-                for p in pos_list:
-                    p_sym = p.get("contractPair", "") or p.get("symbol", "")
-                    if SYMBOL.replace("-", "").upper() in p_sym.replace("-", "").upper():
-                        matched_pos = p
-                        break
+            for attempt in range(3):
+                positions = self.client.get_open_positions()
+                pos_list = positions if isinstance(positions, list) else (positions.get("data") or positions.get("result") or [])
+                if isinstance(pos_list, list):
+                    for p in pos_list:
+                        p_sym = p.get("contractPair", "") or p.get("symbol", "")
+                        if SYMBOL.replace("-", "").upper() in p_sym.replace("-", "").upper():
+                            matched_pos = p
+                            break
+                if matched_pos:
+                    break
+                if attempt < 2:
+                    time.sleep(1.0)
 
             if matched_pos:
+                self.missing_pos_count = 0
                 entry = float(matched_pos.get("entryPrice", 0.0))
                 qty = float(matched_pos.get("quantity") or matched_pos.get("positionAmount") or matched_pos.get("size") or CONTRACT_QTY)
                 side = "BUY" if str(matched_pos.get("positionType", "")).upper() == "LONG" else "SELL"
@@ -199,7 +206,13 @@ class CloudTradingBot:
                     self.active_trade["tpsl_attached"] = True
             else:
                 if self.active_trade:
-                    log.info("Exchange reports position closed. Processing trade outcome...")
+                    self.missing_pos_count = getattr(self, "missing_pos_count", 0) + 1
+                    # Require 4 consecutive cycles (~2 minutes) of missing position before declaring closed
+                    if self.missing_pos_count < 4:
+                        log.warning(f"Active position not returned by exchange (strike {self.missing_pos_count}/4). Retrying next cycle...")
+                        return
+
+                    log.info("Exchange confirmed position closed after multiple checks. Processing trade outcome...")
                     trade = self.active_trade
                     side = trade["side"]
                     entry = trade["entry"]
@@ -207,29 +220,38 @@ class CloudTradingBot:
                     tgt = trade["target"]
                     qty = trade.get("qty", CONTRACT_QTY)
 
-                    # Fetch latest 15m candle to determine exit price
+                    # Fetch latest 15m candle to determine real exit price
                     c15m = self.client.get_candles(RESOLUTION_15M, 5)
                     last_c = c15m[-1] if c15m else {"close": entry, "high": entry, "low": entry}
                     exit_price = last_c.get("close", entry)
 
+                    is_win = False
                     if side == "BUY":
-                        if last_c.get("high", 0.0) >= tgt or exit_price >= (tgt - 5.0):
+                        if last_c.get("high", 0.0) >= tgt:
                             exit_price = tgt
                             is_win = True
                             outcome_str, outcome_emoji = f"PROFIT TARGET (+₹{MAX_PROFIT_PER_TRADE_INR:.0f}) 🎯", "🎉"
-                        else:
+                        elif last_c.get("low", 999999.0) <= sl:
                             exit_price = sl
                             is_win = False
                             outcome_str, outcome_emoji = f"STOP LOSS (-₹{MAX_LOSS_PER_TRADE_INR:.0f}) 🛑", "🛑"
+                        else:
+                            exit_price = last_c.get("close", entry)
+                            is_win = exit_price >= entry
+                            outcome_str, outcome_emoji = ("MANUAL / MARKET CLOSE (PROFIT) 🎯", "🎉") if is_win else ("MANUAL / MARKET CLOSE (LOSS) 🛑", "🛑")
                     else:
-                        if last_c.get("low", 999999.0) <= tgt or exit_price <= (tgt + 5.0):
+                        if last_c.get("low", 999999.0) <= tgt:
                             exit_price = tgt
                             is_win = True
                             outcome_str, outcome_emoji = f"PROFIT TARGET (+₹{MAX_PROFIT_PER_TRADE_INR:.0f}) 🎯", "🎉"
-                        else:
+                        elif last_c.get("high", 0.0) >= sl:
                             exit_price = sl
                             is_win = False
                             outcome_str, outcome_emoji = f"STOP LOSS (-₹{MAX_LOSS_PER_TRADE_INR:.0f}) 🛑", "🛑"
+                        else:
+                            exit_price = last_c.get("close", entry)
+                            is_win = exit_price <= entry
+                            outcome_str, outcome_emoji = ("MANUAL / MARKET CLOSE (PROFIT) 🎯", "🎉") if is_win else ("MANUAL / MARKET CLOSE (LOSS) 🛑", "🛑")
 
                     pnl_pts = (exit_price - entry) if side == "BUY" else (entry - exit_price)
                     pnl_inr = pnl_pts * qty
@@ -264,6 +286,7 @@ class CloudTradingBot:
                         f"{loss_warning}"
                     )
                     self.active_trade = None
+                    self.missing_pos_count = 0
         except Exception as e:
             log.error(f"Error syncing active trade from exchange: {e}")
 
