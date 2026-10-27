@@ -33,4 +33,5 @@ RESOLUTION_15M             = "15m"      # Screen 4: 15-Minute Momentum Filter (B
 EMA_TREND_PERIOD           = 20         # 20 EMA for 1D, 4H, 1H, and 15m
 EMA_FILTER_PERIOD          = 50         # 50 EMA for 1H alignment
 MIN_REJECTION_BODY_PTS     = 20.0       # Minimum 20 pts solid candle body for pullback rejection
+MIN_SR_BUFFER_PTS          = 140.0      # Screen 5: Minimum 140 pts buffer away from 48h Support Floor (for Short) & Resistance Ceiling (for Long)
 

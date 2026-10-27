@@ -23,7 +23,7 @@ from config import (
     MAX_LOSS_PER_TRADE_INR, MAX_PROFIT_PER_TRADE_INR,
     MAX_LOSSES_PER_DAY, MAX_TRADES_PER_DAY, COOLDOWN_LOSS_MINS,
     RESOLUTION_1D, RESOLUTION_4H, RESOLUTION_1H, RESOLUTION_15M,
-    EMA_TREND_PERIOD, EMA_FILTER_PERIOD, MIN_REJECTION_BODY_PTS
+    EMA_TREND_PERIOD, EMA_FILTER_PERIOD, MIN_REJECTION_BODY_PTS, MIN_SR_BUFFER_PTS
 )
 from shark_api import SharkClient
 
@@ -338,7 +338,7 @@ class CloudTradingBot:
         elif cmd_lower in ["/status", "status"]:
             c1d = self.client.get_candles(RESOLUTION_1D, 25)
             c4h = self.client.get_candles(RESOLUTION_4H, 25)
-            c1h = self.client.get_candles(RESOLUTION_1H, 25)
+            c1h = self.client.get_candles(RESOLUTION_1H, 60)
             c15m = self.client.get_candles(RESOLUTION_15M, 25)
             curr_price = c15m[-1]["close"] if c15m else (c1h[-1]["close"] if c1h else 0.0)
 
@@ -348,6 +348,13 @@ class CloudTradingBot:
             ema20_1h = calc_ema([c["close"] for c in c1h], 20)[-1] if (c1h and len(c1h) >= 20) else curr_price
             ema50_1h = calc_ema([c["close"] for c in c1h], 50)[-1] if (c1h and len(c1h) >= 50) else ema20_1h
             ema20_15m = calc_ema([c["close"] for c in c15m], 20)[-1] if (c15m and len(c15m) >= 20) else curr_price
+
+            # 48-Hour Structural Support Floor & Resistance Ceiling
+            last_48h_c = c1h[-48:] if (c1h and len(c1h) >= 48) else (c1h if c1h else [])
+            support_floor = min(c["low"] for c in last_48h_c) if last_48h_c else curr_price
+            resistance_ceiling = max(c["high"] for c in last_48h_c) if last_48h_c else curr_price
+            dist_to_support = curr_price - support_floor
+            dist_to_resistance = resistance_ceiling - curr_price
 
             t_1d_str = "BULLISH 🟢" if curr_price > ema20_1d else "BEARISH 🔴"
             t_4h_str = "BULLISH 🟢" if curr_price > ema20_4h else "BEARISH 🔴"
@@ -382,11 +389,12 @@ class CloudTradingBot:
                 f"📊 *SHARK BOT FULL RADAR & STATUS* ☁️\n\n"
                 f"💰 *Pair*: `{SYMBOL}` | *SOL Price*: ₹{curr_price:,.0f} INR\n"
                 f"• *Bot State*: {state}\n\n"
-                f"📊 *4-Timeframe Screens Live:*\n"
+                f"📊 *5-Screen Radar Live:*\n"
                 f"1️⃣ *1-Day Macro*: {t_1d_str} (EMA 20: ₹{ema20_1d:,.0f})\n"
                 f"2️⃣ *4-Hour Swing*: {t_4h_str} (EMA 20: ₹{ema20_4h:,.0f})\n"
                 f"3️⃣ *1-Hour Pullback*: 20 EMA: ₹{ema20_1h:,.0f} ({dist_1h_str}) | 50 EMA: ₹{ema50_1h:,.0f}\n"
-                f"4️⃣ *15-Min Shield*: {t_15m_str} (EMA 20: ₹{ema20_15m:,.0f})\n\n"
+                f"4️⃣ *15-Min Shield*: {t_15m_str} (EMA 20: ₹{ema20_15m:,.0f})\n"
+                f"5️⃣ *48h S/R Shield*: Floor ₹{support_floor:,.0f} (+{dist_to_support:.0f} pts) | Ceiling ₹{resistance_ceiling:,.0f} (-{dist_to_resistance:.0f} pts)\n\n"
                 f"🎯 *Strategy Bias*: *{bias_str}*\n"
                 f"• *Status*: {pos_text}\n\n"
                 f"🛡️ *Risk & Capital Control:*\n"
@@ -495,6 +503,13 @@ class CloudTradingBot:
         prev_candle = c1h[-2] if len(c1h) >= 2 else curr_candle
         sol_price   = curr_candle["close"]
 
+        # 48-Hour Structural Support Floor & Resistance Ceiling
+        last_48h_c = c1h[-48:] if len(c1h) >= 48 else c1h
+        support_floor = min(c["low"] for c in last_48h_c)
+        resistance_ceiling = max(c["high"] for c in last_48h_c)
+        dist_to_support = sol_price - support_floor
+        dist_to_resistance = resistance_ceiling - sol_price
+
         t_1d_str = "BULLISH 🟢" if trend_1d == 1 else "BEARISH 🔴"
         t_4h_str = "BULLISH 🟢" if trend_4h == 1 else "BEARISH 🔴"
         bias_str = "SHORT ONLY 📉" if (trend_1d == -1 and trend_4h == -1) else ("LONG ONLY 📈" if (trend_1d == 1 and trend_4h == 1) else "NEUTRAL / CHOP ⏸️")
@@ -531,11 +546,12 @@ class CloudTradingBot:
             send_telegram(
                 f"💓 *SHARK BOT FULL RADAR & HEARTBEAT* 🟢\n\n"
                 f"💰 *Pair*: `{SYMBOL}` | *SOL Price*: ₹{sol_price:,.0f} INR\n\n"
-                f"📊 *4-Timeframe Screens Live:*\n"
+                f"📊 *5-Screen Radar Live:*\n"
                 f"1️⃣ *1-Day Macro*: {t_1d_str} (EMA 20: ₹{ema20_1d[-1]:,.0f})\n"
                 f"2️⃣ *4-Hour Swing*: {t_4h_str} (EMA 20: ₹{ema20_4h[-1]:,.0f})\n"
                 f"3️⃣ *1-Hour Pullback*: 20 EMA: ₹{ema20_1h[-1]:,.0f} ({dist_1h_str}) | 50 EMA: ₹{ema50_1h[-1]:,.0f}\n"
-                f"4️⃣ *15-Min Shield*: {shield_status} (EMA 20: ₹{ema20_15m[-1]:,.0f})\n\n"
+                f"4️⃣ *15-Min Shield*: {shield_status} (EMA 20: ₹{ema20_15m[-1]:,.0f})\n"
+                f"5️⃣ *48h S/R Shield*: Floor ₹{support_floor:,.0f} (+{dist_to_support:.0f} pts) | Ceiling ₹{resistance_ceiling:,.0f} (-{dist_to_resistance:.0f} pts)\n\n"
                 f"🎯 *Strategy Mode*: *{bias_str}*\n"
                 f"• *Status*: {pos_str}\n\n"
                 f"🛡️ *Risk & Capital Control:*\n"
@@ -636,6 +652,7 @@ class CloudTradingBot:
 
         # 🔴 SHORT SIGNAL: 1D Bearish + 4H Bearish + 1H below 50 EMA + Pullback to 20 EMA + Solid Red Rejection
         # 🛡️ 15-MINUTE ANTI-PUMP SHIELD: Short is strictly blocked if 15m is actively pumping (Green candle or above 15m 20 EMA)
+        # 🛡️ 48-HOUR S/R SHIELD: Short is strictly blocked if price is within MIN_SR_BUFFER_PTS above the 48h Support Floor
         if trend_1d == -1 and trend_4h == -1:
             if close_1h < e50_1h and high_1h >= e20_1h and close_1h < e20_1h:
                 body_pts = open_1h - close_1h
@@ -643,14 +660,18 @@ class CloudTradingBot:
                     is_15m_red = curr_15m["close"] < curr_15m["open"]
                     is_15m_under_ema = curr_15m["close"] <= ema20_15m[-1]
                     if is_15m_red and is_15m_under_ema:
-                        signal = "SELL"
-                        reversal_detail = f"🔴 1D/4H Bearish + 1H 20 EMA Rejection (-{body_pts:.0f} pts) + 15m Confirmed Red (Shield Clear) 🛡️"
+                        if dist_to_support < MIN_SR_BUFFER_PTS:
+                            log.info(f"SHORT BLOCKED by 48h Support Floor Shield: Only {dist_to_support:.1f} pts above floor ₹{support_floor:,.0f} (Min buffer required: {MIN_SR_BUFFER_PTS:.0f} pts)")
+                        else:
+                            signal = "SELL"
+                            reversal_detail = f"🔴 1D/4H Bearish + 1H 20 EMA Rejection (-{body_pts:.0f} pts) + 15m Confirmed Red + S/R Shield Clear (+{dist_to_support:.0f} pts above floor) 🛡️"
                     else:
                         pump_reason = "15m candle is Green" if not is_15m_red else "Price above 15m 20 EMA"
                         log.info(f"SHORT BLOCKED by 15m Anti-Pump Shield ({pump_reason})")
 
         # 🟢 LONG SIGNAL: 1D Bullish + 4H Bullish + 1H above 50 EMA + Pullback to 20 EMA + Solid Green Bounce
         # 🛡️ 15-MINUTE ANTI-DUMP SHIELD: Long is strictly blocked if 15m is actively dumping (Red candle or below 15m 20 EMA)
+        # 🛡️ 48-HOUR S/R SHIELD: Long is strictly blocked if price is within MIN_SR_BUFFER_PTS below the 48h Resistance Ceiling
         elif trend_1d == 1 and trend_4h == 1:
             if close_1h > e50_1h and low_1h <= e20_1h and close_1h > e20_1h:
                 body_pts = close_1h - open_1h
@@ -658,8 +679,11 @@ class CloudTradingBot:
                     is_15m_green = curr_15m["close"] > curr_15m["open"]
                     is_15m_above_ema = curr_15m["close"] >= ema20_15m[-1]
                     if is_15m_green and is_15m_above_ema:
-                        signal = "BUY"
-                        reversal_detail = f"🟢 1D/4H Bullish + 1H 20 EMA Bounce (+{body_pts:.0f} pts) + 15m Confirmed Green (Shield Clear) 🛡️"
+                        if dist_to_resistance < MIN_SR_BUFFER_PTS:
+                            log.info(f"LONG BLOCKED by 48h Resistance Ceiling Shield: Only {dist_to_resistance:.1f} pts below ceiling ₹{resistance_ceiling:,.0f} (Min buffer required: {MIN_SR_BUFFER_PTS:.0f} pts)")
+                        else:
+                            signal = "BUY"
+                            reversal_detail = f"🟢 1D/4H Bullish + 1H 20 EMA Bounce (+{body_pts:.0f} pts) + 15m Confirmed Green + S/R Shield Clear (-{dist_to_resistance:.0f} pts below ceiling) 🛡️"
                     else:
                         dump_reason = "15m candle is Red" if not is_15m_green else "Price below 15m 20 EMA"
                         log.info(f"LONG BLOCKED by 15m Anti-Dump Shield ({dump_reason})")
