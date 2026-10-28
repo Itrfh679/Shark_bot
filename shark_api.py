@@ -468,8 +468,8 @@ class SharkClient:
         Loops and retries until verified on Shark Exchange.
         """
         target_sym = symbol or self.symbol
-        # 1. Place Entry Market Order
-        res = self.place_market_order(side, qty, symbol=target_sym, tp_price=take_profit, sl_price=stop_loss)
+        # 1. Place Clean Entry Market Order (TP/SL are attached via native split-tp-sl to prevent duplicate orders)
+        res = self.place_market_order(side, qty, symbol=target_sym)
         if not res.get("success"):
             return {
                 "success": False,

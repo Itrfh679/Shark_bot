@@ -770,7 +770,7 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
             qty = 4.5
             tp_price = 127.00
             sl_price = 123.40
-            res = client.place_market_order("BUY", qty, sym, tp_price=tp_price, sl_price=sl_price)
+            res = client.place_market_order("BUY", qty, sym)
             # If plain market order succeeded, also place bracket orders directly
             if res.get("success") and res.get("bracket_fallback"):
                 client.place_limit_order("SELL", qty, tp_price, sym, reduce_only=True)
