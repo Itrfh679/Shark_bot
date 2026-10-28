@@ -708,8 +708,24 @@ class CloudTradingBot:
         expected_reward = abs(entry - target) * CONTRACT_QTY
         margin_required = (entry * CONTRACT_QTY) / LEVERAGE
 
-        # Place Order
-        res = self.client.place_bracket_order(signal, CONTRACT_QTY, sl, target)
+        # 🔒 HARD SAFETY GUARD: Double-check exchange open positions directly.
+        # If any open position already exists on Shark Exchange, strictly abort. NEVER double-enter.
+        existing_pos = self.client.get_open_positions()
+        pos_list = existing_pos if isinstance(existing_pos, list) else (existing_pos.get("data") or existing_pos.get("result") or [])
+        if isinstance(pos_list, list):
+            for p in pos_list:
+                p_sym = p.get("contractPair", "") or p.get("symbol", "")
+                if SYMBOL.replace("-", "").upper() in p_sym.replace("-", "").upper():
+                    pos_qty = float(p.get("quantity") or p.get("positionAmount") or 0.0)
+                    if pos_qty > 0:
+                        log.warning(f"ENTRY BLOCKED BY HARD SAFETY GUARD: Position of {pos_qty} SOL already active on exchange! Margin lock protected.")
+                        return
+
+        # Enforce exact max trade quantity (0.38 SOL = strict ₹150 max margin at 25x)
+        trade_qty = min(CONTRACT_QTY, 0.38)
+
+        # Place Clean Order & Attach Native TP/SL Bracket
+        res = self.client.place_bracket_order(signal, trade_qty, sl, target)
         if not res.get("success"):
             raw_err = str(res.get("raw", {}).get("error", "Rejected"))
             log.error(f"Order failed on exchange: {raw_err}")
@@ -718,14 +734,6 @@ class CloudTradingBot:
 
         attach_res = res.get("attach_res", {})
         tpsl_attached = bool(res.get("tpsl_attached") or attach_res.get("verified_on_exchange") or attach_res.get("success"))
-
-        # If not confirmed on first attempt, retry immediately to guarantee SL and TP are set together with entry!
-        if not tpsl_attached:
-            log.warning("TP/SL not confirmed on first attempt, retrying immediately...")
-            time.sleep(1.0)
-            retry_res = self.client.attach_tpsl_to_open_position(SYMBOL, tp_price=target, sl_price=sl)
-            tpsl_attached = bool(retry_res.get("verified_on_exchange") or retry_res.get("success"))
-
         tpsl_status_msg = "✅ SL & TP Active on Shark Exchange" if tpsl_attached else "⏳ Attaching on exchange..."
 
         self.last_candle_time = curr_candle["time"]

@@ -177,9 +177,10 @@ class SharkClient:
     # ─────────────────────────────────────────────────────────
     #  ORDER EXECUTION
     # ─────────────────────────────────────────────────────────
-    def place_market_order(self, side: str, qty: float, symbol: str = None, tp_price: float = None, sl_price: float = None, reduce_only: bool = False) -> dict:
+    def place_market_order(self, side: str, qty: float, symbol: str = None, reduce_only: bool = False) -> dict:
         """
-        Places market order on Shark Exchange, optionally with TP and SL.
+        Places clean single market order on Shark Exchange (Never with bracket params).
+        Guarantees exact quantity is placed without duplicate retries.
         """
         if not self.is_live:
             return {"success": True, "order_id": f"sim_{int(time.time())}"}
@@ -199,10 +200,6 @@ class SharkClient:
             "deviceType": "WEB",
             "userCategory": "EXTERNAL",
         }
-        if tp_price is not None:
-            payload["takeProfitPrice"] = float(tp_price)
-        if sl_price is not None:
-            payload["stopLossPrice"] = float(sl_price)
 
         body = json.dumps(payload, separators=(",", ":"))
         sig = self._sign_body(payload)
@@ -212,21 +209,6 @@ class SharkClient:
             r = self.session.post(f"{self.base_url}{endpoint}", data=body, headers=headers, timeout=15)
             if r.status_code in [200, 201]:
                 return {"success": True, "data": r.json()}
-            
-            # If rejected because of takeProfitPrice/stopLossPrice, retry clean market order
-            if tp_price is not None or sl_price is not None:
-                log.warning(f"Retrying plain market order without bracket params: {r.text}")
-                payload.pop("takeProfitPrice", None)
-                payload.pop("stopLossPrice", None)
-                payload["timestamp"] = str(int(time.time() * 1000))
-                body2 = json.dumps(payload, separators=(",", ":"))
-                sig2 = self._sign_body(payload)
-                headers2 = {"api-key": self.api_key, "signature": sig2, "Content-Type": "application/json", "accept": "*/*"}
-                r2 = self.session.post(f"{self.base_url}{endpoint}", data=body2, headers=headers2, timeout=15)
-                if r2.status_code in [200, 201]:
-                    return {"success": True, "data": r2.json(), "bracket_fallback": True}
-                else:
-                    return {"success": False, "error": r2.text}
             
             log.error(f"Order placement failed: {r.status_code} - {r.text}")
             return {"success": False, "error": r.text}
@@ -418,22 +400,13 @@ class SharkClient:
 
         log.info(f"Submitting Exchange TP & SL for {target_sym} (pos_id={pos_id}, {pos_type} {qty}): TP={clean_tp}, SL={clean_sl}")
 
-        # 1. Primary method: Split TP/SL API call (sets native bracket on position card)
+        # Native Split TP/SL API call (sets native bracket on position card)
         split_res = {}
         if pos_id:
             split_res = self.set_split_tp_sl(pos_id, clean_tp, clean_sl, qty, symbol=target_sym)
             log.info(f"Split TP/SL result: {split_res.get('success')}")
 
-        # 2. Fallback method: Direct reduce-only bracket orders if split TP/SL did not fully succeed
-        fallback_res = {}
-        if not split_res.get("success"):
-            log.warning("Split TP/SL failed or partially rejected, placing direct reduce-only bracket orders...")
-            r_tp = self.place_limit_order(exit_side, qty, clean_tp, target_sym, reduce_only=True, position_id=pos_id)
-            r_sl = self.place_stop_market_order(exit_side, qty, clean_sl, target_sym, reduce_only=True, position_id=pos_id)
-            fallback_res = {"tp_order": r_tp, "sl_order": r_sl}
-            log.info(f"Fallback orders placed: TP={r_tp.get('success')}, SL={r_sl.get('success')}")
-
-        # 3. Verification step: Check exchange position to confirm orders are registered
+        # Verification step: Check exchange position to confirm orders are registered
         time.sleep(1.0)
         verified_on_exchange = False
         latest_positions = self.get_open_positions()
@@ -449,7 +422,7 @@ class SharkClient:
                         log.info(f"Verified on exchange: SL_qty={sl_q}, TP_qty={tp_q}")
                     break
 
-        is_success = bool(split_res.get("success") or verified_on_exchange or (fallback_res.get("tp_order", {}).get("success") and fallback_res.get("sl_order", {}).get("success")))
+        is_success = bool(split_res.get("success") or verified_on_exchange)
         return {
             "success": is_success,
             "verified_on_exchange": verified_on_exchange,
@@ -458,7 +431,6 @@ class SharkClient:
             "tp_price": clean_tp,
             "sl_price": clean_sl,
             "split_res": split_res,
-            "fallback_res": fallback_res,
             "position": target_pos
         }
 
