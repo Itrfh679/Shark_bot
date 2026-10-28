@@ -360,18 +360,27 @@ class CloudTradingBot:
             t_4h_str = "BULLISH 🟢" if curr_price > ema20_4h else "BEARISH 🔴"
             bias_str = "SHORT ONLY 📉" if ("BEARISH" in t_1d_str and "BEARISH" in t_4h_str) else ("LONG ONLY 📈" if ("BULLISH" in t_1d_str and "BULLISH" in t_4h_str) else "NEUTRAL / CHOP ⏸️")
 
-            # 15m Momentum Check
-            is_15m_green = c15m[-1]["close"] > c15m[-1]["open"] if c15m else False
-            is_15m_above_ema = c15m[-1]["close"] > ema20_15m if c15m else False
-            is_15m_pumping = is_15m_green or is_15m_above_ema
+            # 15m Confirmed Close & Live Check
+            c_closed_15m = c15m[-2] if len(c15m) >= 2 else (c15m[-1] if c15m else {})
+            c_curr_15m = c15m[-1] if c15m else {}
+            is_closed_red = (c_closed_15m.get("close", 0) < c_closed_15m.get("open", 0)) if c_closed_15m else False
+            is_closed_green = (c_closed_15m.get("close", 0) > c_closed_15m.get("open", 0)) if c_closed_15m else False
+            is_live_pumping = (c_curr_15m.get("close", 0) > ema20_15m) if c_curr_15m else False
 
             if "SHORT" in bias_str:
-                t_15m_str = "PUMPING (Green) 🟢 [Short Blocked 🛑]" if is_15m_pumping else "BEARISH (Red) 🔴 [Short Allowed ✅]"
-                action_text = "15m pump chal raha hai (waiting for Red candle)" if is_15m_pumping else "Waiting for 1H Pullback Rejection (-20 pts Red)"
+                if is_closed_red and not is_live_pumping:
+                    t_15m_str = "CONFIRMED RED 🔴 [Short Ready ✅]"
+                    action_text = "15m Red Close Confirmed! Scanning 1H Pullback Entry"
+                else:
+                    t_15m_str = "WAITING RED CLOSE ⏳ [Short Blocked 🛑]"
+                    action_text = "Waiting for 15m candle to close confirmed Red"
             elif "LONG" in bias_str:
-                is_15m_dumping = (not is_15m_green) or (not is_15m_above_ema)
-                t_15m_str = "DUMPING (Red) 🔴 [Long Blocked 🛑]" if is_15m_dumping else "BULLISH (Green) 🟢 [Long Allowed ✅]"
-                action_text = "15m dump chal raha hai (waiting for Green candle)" if is_15m_dumping else "Waiting for 1H Pullback Bounce (+20 pts Green)"
+                if is_closed_green and is_live_pumping:
+                    t_15m_str = "CONFIRMED GREEN 🟢 [Long Ready ✅]"
+                    action_text = "15m Green Close Confirmed! Scanning 1H Pullback Entry"
+                else:
+                    t_15m_str = "WAITING GREEN CLOSE ⏳ [Long Blocked 🛑]"
+                    action_text = "Waiting for 15m candle to close confirmed Green"
             else:
                 t_15m_str = "NEUTRAL / CHOP ⏸️"
                 action_text = "1D aur 4H trend me conflict hai (No trades)"
@@ -498,6 +507,7 @@ class CloudTradingBot:
         closes_15m = [c["close"] for c in c15m]
         ema20_15m  = calc_ema(closes_15m, EMA_TREND_PERIOD)
         curr_15m   = c15m[-1]
+        closed_15m = c15m[-2] if len(c15m) >= 2 else curr_15m
 
         curr_candle = c1h[-1]
         prev_candle = c1h[-2] if len(c1h) >= 2 else curr_candle
@@ -631,62 +641,67 @@ class CloudTradingBot:
                 self.active_trade = None
             return
 
-        # Entry constraints: Stop if 2 losses today, or in 30-min loss cooldown, or same candle
+        # Entry constraints: Stop if 2 losses today, or in 30-min loss cooldown, or same 15m candle already traded
         if self.daily_stats.get("losses_today", 0) >= MAX_LOSSES_PER_DAY:
             return
         if self.last_loss_time > 0 and (time.time() - self.last_loss_time < COOLDOWN_LOSS_MINS * 60):
             return
-        if curr_candle["time"] == self.last_candle_time:
+        if closed_15m["time"] == self.last_candle_time:
             return
 
-        # Triple-Screen Multi-Timeframe Entry Logic
+        # Multi-Timeframe Entry Logic with Confirmed 15m Candle Close Trigger
         signal = None
         reversal_detail = ""
 
         high_1h  = curr_candle["high"]
         low_1h   = curr_candle["low"]
-        open_1h  = curr_candle["open"]
         close_1h = curr_candle["close"]
         e20_1h   = ema20_1h[-1]
         e50_1h   = ema50_1h[-1]
 
-        # 🔴 SHORT SIGNAL: 1D Bearish + 4H Bearish + 1H below 50 EMA + Pullback to 20 EMA + Solid Red Rejection
-        # 🛡️ 15-MINUTE ANTI-PUMP SHIELD: Short is strictly blocked if 15m is actively pumping (Green candle or above 15m 20 EMA)
-        # 🛡️ 48-HOUR S/R SHIELD: Short is strictly blocked if price is within MIN_SR_BUFFER_PTS above the 48h Support Floor
+        # 🔴 SHORT SIGNAL: 
+        # 1D Bearish + 4H Bearish + 1H below 50 EMA & in 20 EMA pullback zone
+        # + Screen 4: Officially CLOSED 15m Red Candle (Eliminates all mid-candle wick traps)
+        # + Screen 5: At least MIN_SR_BUFFER_PTS (140 pts) above 48h Support Floor
         if trend_1d == -1 and trend_4h == -1:
-            if close_1h < e50_1h and high_1h >= e20_1h and close_1h < e20_1h:
-                body_pts = open_1h - close_1h
-                if close_1h < open_1h and body_pts >= MIN_REJECTION_BODY_PTS:
-                    is_15m_red = curr_15m["close"] < curr_15m["open"]
-                    is_15m_under_ema = curr_15m["close"] <= ema20_15m[-1]
-                    if is_15m_red and is_15m_under_ema:
-                        if dist_to_support < MIN_SR_BUFFER_PTS:
-                            log.info(f"SHORT BLOCKED by 48h Support Floor Shield: Only {dist_to_support:.1f} pts above floor ₹{support_floor:,.0f} (Min buffer required: {MIN_SR_BUFFER_PTS:.0f} pts)")
-                        else:
-                            signal = "SELL"
-                            reversal_detail = f"🔴 1D/4H Bearish + 1H 20 EMA Rejection (-{body_pts:.0f} pts) + 15m Confirmed Red + S/R Shield Clear (+{dist_to_support:.0f} pts above floor) 🛡️"
-                    else:
-                        pump_reason = "15m candle is Green" if not is_15m_red else "Price above 15m 20 EMA"
-                        log.info(f"SHORT BLOCKED by 15m Anti-Pump Shield ({pump_reason})")
+            in_pullback_zone = (close_1h < e50_1h) and (high_1h >= e20_1h or prev_candle["high"] >= e20_1h or close_1h <= e20_1h)
+            if in_pullback_zone:
+                body_15m = closed_15m["open"] - closed_15m["close"]
+                is_closed_15m_red = closed_15m["close"] < closed_15m["open"] and body_15m >= 15.0
+                is_closed_under_ema = closed_15m["close"] <= ema20_15m[-2]
+                is_live_not_pumping = curr_15m["close"] <= ema20_15m[-1]
 
-        # 🟢 LONG SIGNAL: 1D Bullish + 4H Bullish + 1H above 50 EMA + Pullback to 20 EMA + Solid Green Bounce
-        # 🛡️ 15-MINUTE ANTI-DUMP SHIELD: Long is strictly blocked if 15m is actively dumping (Red candle or below 15m 20 EMA)
-        # 🛡️ 48-HOUR S/R SHIELD: Long is strictly blocked if price is within MIN_SR_BUFFER_PTS below the 48h Resistance Ceiling
-        elif trend_1d == 1 and trend_4h == 1:
-            if close_1h > e50_1h and low_1h <= e20_1h and close_1h > e20_1h:
-                body_pts = close_1h - open_1h
-                if close_1h > open_1h and body_pts >= MIN_REJECTION_BODY_PTS:
-                    is_15m_green = curr_15m["close"] > curr_15m["open"]
-                    is_15m_above_ema = curr_15m["close"] >= ema20_15m[-1]
-                    if is_15m_green and is_15m_above_ema:
-                        if dist_to_resistance < MIN_SR_BUFFER_PTS:
-                            log.info(f"LONG BLOCKED by 48h Resistance Ceiling Shield: Only {dist_to_resistance:.1f} pts below ceiling ₹{resistance_ceiling:,.0f} (Min buffer required: {MIN_SR_BUFFER_PTS:.0f} pts)")
-                        else:
-                            signal = "BUY"
-                            reversal_detail = f"🟢 1D/4H Bullish + 1H 20 EMA Bounce (+{body_pts:.0f} pts) + 15m Confirmed Green + S/R Shield Clear (-{dist_to_resistance:.0f} pts below ceiling) 🛡️"
+                if is_closed_15m_red and is_closed_under_ema and is_live_not_pumping:
+                    if dist_to_support < MIN_SR_BUFFER_PTS:
+                        log.info(f"SHORT BLOCKED by 48h Support Floor Shield: Only {dist_to_support:.1f} pts above floor ₹{support_floor:,.0f} (Min buffer required: {MIN_SR_BUFFER_PTS:.0f} pts)")
                     else:
-                        dump_reason = "15m candle is Red" if not is_15m_green else "Price below 15m 20 EMA"
-                        log.info(f"LONG BLOCKED by 15m Anti-Dump Shield ({dump_reason})")
+                        signal = "SELL"
+                        reversal_detail = f"🔴 1D/4H Bearish + 1H Pullback Zone + 15m Confirmed Red Close (-{body_15m:.0f} pts body) + S/R Shield Clear (+{dist_to_support:.0f} pts above floor) 🛡️"
+                else:
+                    reason = "15m candle not confirmed red" if not is_closed_15m_red else ("15m closed above 20 EMA" if not is_closed_under_ema else "Live price pumping above 20 EMA")
+                    log.info(f"SHORT WAITING: {reason}")
+
+        # 🟢 LONG SIGNAL:
+        # 1D Bullish + 4H Bullish + 1H above 50 EMA & in 20 EMA pullback zone
+        # + Screen 4: Officially CLOSED 15m Green Candle (Eliminates all mid-candle wick traps)
+        # + Screen 5: At least MIN_SR_BUFFER_PTS (140 pts) below 48h Resistance Ceiling
+        elif trend_1d == 1 and trend_4h == 1:
+            in_pullback_zone = (close_1h > e50_1h) and (low_1h <= e20_1h or prev_candle["low"] <= e20_1h or close_1h >= e20_1h)
+            if in_pullback_zone:
+                body_15m = closed_15m["close"] - closed_15m["open"]
+                is_closed_15m_green = closed_15m["close"] > closed_15m["open"] and body_15m >= 15.0
+                is_closed_above_ema = closed_15m["close"] >= ema20_15m[-2]
+                is_live_not_dumping = curr_15m["close"] >= ema20_15m[-1]
+
+                if is_closed_15m_green and is_closed_above_ema and is_live_not_dumping:
+                    if dist_to_resistance < MIN_SR_BUFFER_PTS:
+                        log.info(f"LONG BLOCKED by 48h Resistance Ceiling Shield: Only {dist_to_resistance:.1f} pts below ceiling ₹{resistance_ceiling:,.0f} (Min buffer required: {MIN_SR_BUFFER_PTS:.0f} pts)")
+                    else:
+                        signal = "BUY"
+                        reversal_detail = f"🟢 1D/4H Bullish + 1H Pullback Zone + 15m Confirmed Green Close (+{body_15m:.0f} pts body) + S/R Shield Clear (-{dist_to_resistance:.0f} pts below ceiling) 🛡️"
+                else:
+                    reason = "15m candle not confirmed green" if not is_closed_15m_green else ("15m closed below 20 EMA" if not is_closed_above_ema else "Live price dumping below 20 EMA")
+                    log.info(f"LONG WAITING: {reason}")
 
         if not signal:
             return
@@ -736,7 +751,7 @@ class CloudTradingBot:
         tpsl_attached = bool(res.get("tpsl_attached") or attach_res.get("verified_on_exchange") or attach_res.get("success"))
         tpsl_status_msg = "✅ SL & TP Active on Shark Exchange" if tpsl_attached else "⏳ Attaching on exchange..."
 
-        self.last_candle_time = curr_candle["time"]
+        self.last_candle_time = closed_15m["time"]
         self.daily_stats["trades_today"] += 1
         self._save_daily_stats()
         self.active_trade = {
