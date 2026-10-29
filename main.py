@@ -76,7 +76,7 @@ def calc_rsi(closes: list, period: int = 14) -> float:
 class CloudTradingBot:
     def __init__(self):
         self.client = SharkClient()
-        self.is_running = True
+        self.is_running = False
         self.public_ip = "Unknown"
         self.active_trade = None
         self.last_candle_time = 0
@@ -450,30 +450,17 @@ class CloudTradingBot:
         self.detect_public_ip()
 
         send_telegram(
-            f"🦈 *SHARK QUAD-SCREEN MTF TREND BOT ONLINE!* ☁️\n\n"
-            f"• *Pair*: `{SYMBOL}` (Solana INR Perpetual)\n"
-            f"• *Strategy*: Quad-Screen MTF Trend-Rider (1D ➡️ 4H ➡️ 1H ➡️ 15m Shield) 🛡️\n"
-            f"• *Anti-Pump Shield*: 15m Green pump chalte waqt Short 100% Blocked 🛑\n"
-            f"• *Anti-Dump Shield*: 15m Red dump chalte waqt Long 100% Blocked 🛑\n"
-            f"• *Trade Size*: `{CONTRACT_QTY} SOL` (~₹{MARGIN_REQUIRED:.0f} Margin at {LEVERAGE}×)\n"
-            f"• *Stop Loss*: Exact ₹{MAX_LOSS_PER_TRADE_INR:.0f} Max Loss 🛑\n"
-            f"• *Take Profit*: Exact +₹{MAX_PROFIT_PER_TRADE_INR:.0f} Target (1:2.25 RR) 🎯\n"
-            f"• *Daily Limits*: Max {MAX_LOSSES_PER_DAY} Losses (Stops at ₹{MAX_LOSS_PER_TRADE_INR * MAX_LOSSES_PER_DAY:.0f}) | Unlimited Wins Mode 🔒\n"
-            f"• *Phone Status*: You can close your phone/Termux now! 📱💤\n\n"
-            f"👉 Send `/status` or `/balance` anytime to inspect!"
+            "🛑 *SHARK BOT FULLY SHUT DOWN / OFF!* 💤\n\n"
+            "• *Status*: **100% OFF (Dormant Mode)**\n"
+            "• *Market Scanning*: **STOPPED 🛑**\n"
+            "• *Order Execution*: **DISABLED 🛑**\n"
+            "• *Background Tasks*: **NONE**\n\n"
+            "User request par bot ko bilkul band kar diya gaya hai. Koi trade ya background kaam nahi hoga."
         )
 
-        # Sync open positions immediately upon startup
-        self.sync_active_trade_from_exchange()
-
         while True:
-            try:
-                self._reset_daily_stats_if_needed()
-                if self.is_running:
-                    self._scan_market_cycle()
-            except Exception as e:
-                log.error(f"Strategy error: {e}")
-            time.sleep(30)
+            # Complete shutdown: sleep indefinitely, do not scan or execute any trades
+            time.sleep(120)
 
     def _scan_market_cycle(self):
         # Sync open positions with exchange
@@ -928,7 +915,7 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Shark Exchange Cloud Trading Bot is Active 24x7 OK\n")
+        self.wfile.write(b"Shark Exchange Cloud Trading Bot is COMPLETELY SHUTDOWN / OFF (Dormant Mode)\n")
 
     def log_message(self, format, *args):
         pass
